@@ -1,31 +1,33 @@
-using System.Net.Http.Json;
-using System.Text.Json;
+using Cs2.Plugin.CounterStrikeSharp;
 using Shared.Contracts;
 
 var options = AgentOptions.Parse(args);
-var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+var hostBridge = new DemoHostBridge();
 
-using var http = new HttpClient
+var runtimeOptions = new PluginRuntimeOptions
 {
-    BaseAddress = new Uri(options.BackendBaseUrl.TrimEnd('/') + "/")
+    BackendBaseUrl = options.BackendBaseUrl,
+    ServerApiKey = options.ServerApiKey,
+    ExecutorId = options.ExecutorId,
+    TelemetrySource = "server_bridge_agent_runtime",
+    MaxBatchSize = options.MaxBatchSize,
+    TelemetryFlushSec = options.FlushSec
 };
-http.DefaultRequestHeaders.Add("X-Server-Api-Key", options.ServerApiKey);
 
-var validateRequest = new ValidateJoinRequest(
-    options.ServerId,
-    options.SteamId,
-    options.AccountId,
-    options.MatchSessionId,
-    options.JoinToken);
+using var runtime = new PluginRuntime(runtimeOptions, hostBridge);
 
-var validateResponseHttp = await http.PostAsJsonAsync("v1/attestation/validate-join", validateRequest, jsonOptions);
-validateResponseHttp.EnsureSuccessStatusCode();
-var validate = await validateResponseHttp.Content.ReadFromJsonAsync<ValidateJoinResponse>(jsonOptions)
-    ?? throw new InvalidOperationException("validate-join response was empty");
+await runtime.HandleConnectionAttemptAsync(
+    new PlayerConnectionAttempt(
+        options.MatchSessionId,
+        options.ServerId,
+        options.AccountId,
+        options.SteamId,
+        options.JoinToken),
+    CancellationToken.None);
 
-if (!validate.Allow)
+if (!hostBridge.ConnectionAccepted)
 {
-    Console.WriteLine($"Join denied: {validate.Reason}");
+    Console.WriteLine($"Join denied: {hostBridge.DenyReason ?? "unknown"}");
     return;
 }
 
@@ -37,74 +39,58 @@ while (DateTimeOffset.UtcNow < loopUntil)
 {
     tick += options.SimulateCheat ? 1 : 6;
 
-    var tickEnvelope = new TelemetryEnvelope<TickPlayerState>(
-        options.MatchSessionId,
-        "server_bridge_agent",
-        DateTimeOffset.UtcNow,
-        new[]
-        {
-            BuildTick(options, tick)
-        });
-    await PostAsync(http, "v1/telemetry/ticks", tickEnvelope, jsonOptions);
+    await runtime.CaptureTickAsync(
+        BuildTick(options, tick),
+        CancellationToken.None);
 
-    var losEnvelope = new TelemetryEnvelope<LosSample>(
-        options.MatchSessionId,
-        "server_bridge_agent",
-        DateTimeOffset.UtcNow,
-        new[]
-        {
-            new LosSample(
-                options.MatchSessionId,
-                tick - 1,
-                DateTimeOffset.UtcNow,
-                options.AccountId,
-                options.TargetAccountId,
-                LineOfSight: !options.SimulateCheat,
-                AudibleProxy: false,
-                DistanceMeters: 18.3f)
-        });
-    await PostAsync(http, "v1/telemetry/los", losEnvelope, jsonOptions);
+    await runtime.CaptureVisibilityAsync(
+        new VisibilitySample(
+            options.MatchSessionId,
+            tick - 1,
+            DateTimeOffset.UtcNow,
+            options.AccountId,
+            options.TargetAccountId,
+            LineOfSight: !options.SimulateCheat,
+            AudibleProxy: false,
+            DistanceMeters: 18.3f),
+        CancellationToken.None);
 
-    var shotEnvelope = new TelemetryEnvelope<ShotEvent>(
-        options.MatchSessionId,
-        "server_bridge_agent",
-        DateTimeOffset.UtcNow,
-        new[]
-        {
-            new ShotEvent(
-                options.MatchSessionId,
-                tick,
-                DateTimeOffset.UtcNow,
-                options.AccountId,
-                options.SteamId,
-                options.WeaponId,
-                RecoilIndex: options.SimulateCheat ? 0 : 3,
-                Yaw: 120.5f,
-                Pitch: -1.2f,
-                HitPlayer: true,
-                HitAccountId: options.TargetAccountId,
-                HitSteamId: options.TargetSteamId)
-        });
-    await PostAsync(http, "v1/telemetry/shots", shotEnvelope, jsonOptions);
+    await runtime.CaptureShotAsync(
+        new ShotSample(
+            options.MatchSessionId,
+            tick,
+            DateTimeOffset.UtcNow,
+            options.AccountId,
+            options.SteamId,
+            options.WeaponId,
+            RecoilIndex: options.SimulateCheat ? 0 : 3,
+            Yaw: 120.5f,
+            Pitch: -1.2f,
+            HitPlayer: true,
+            HitAccountId: options.TargetAccountId,
+            HitSteamId: options.TargetSteamId),
+        CancellationToken.None);
 
-    await PrintHealthAsync(http, options, jsonOptions);
-    await PrintActionsAsync(http, options, jsonOptions);
+    await runtime.PollHealthAndEnforceAsync(options.MatchSessionId, CancellationToken.None);
+    await runtime.PollPendingActionsAndApplyAsync(options.MatchSessionId, options.AccountId, CancellationToken.None);
 
     await Task.Delay(TimeSpan.FromSeconds(options.TickIntervalSec));
 }
 
-Console.WriteLine("Server bridge simulation complete.");
+await runtime.FlushTelemetryAsync(options.MatchSessionId, CancellationToken.None);
 
-static TickPlayerState BuildTick(AgentOptions options, long tick)
+Console.WriteLine($"Server bridge simulation complete. AppliedActions={hostBridge.AppliedActions.Count}");
+
+static TickSample BuildTick(AgentOptions options, long tick)
 {
     var speed = options.SimulateCheat ? 480f : 260f;
-    return new TickPlayerState(
+    return new TickSample(
         options.MatchSessionId,
         tick,
         DateTimeOffset.UtcNow,
         options.AccountId,
         options.SteamId,
-        "CT",
+        Team: "CT",
         PosX: 12.2f,
         PosY: 8.1f,
         PosZ: 1.4f,
@@ -122,58 +108,46 @@ static TickPlayerState BuildTick(AgentOptions options, long tick)
         ChokePct: 0.0f);
 }
 
-static async Task PostAsync<T>(
-    HttpClient http,
-    string url,
-    T payload,
-    JsonSerializerOptions jsonOptions)
+internal sealed class DemoHostBridge : IPluginHostBridge
 {
-    var response = await http.PostAsJsonAsync(url, payload, jsonOptions);
-    response.EnsureSuccessStatusCode();
-}
+    public bool ConnectionAccepted { get; private set; }
+    public string? DenyReason { get; private set; }
+    public List<EnforcementAction> AppliedActions { get; } = new();
 
-static async Task PrintHealthAsync(HttpClient http, AgentOptions options, JsonSerializerOptions jsonOptions)
-{
-    var health = await http.GetFromJsonAsync<MatchHealthResponse>(
-        $"v1/attestation/match-health?matchSessionId={options.MatchSessionId}",
-        jsonOptions);
-
-    if (health is null)
+    public Task DenyConnectionAsync(PlayerConnectionAttempt attempt, string reason, CancellationToken cancellationToken)
     {
-        return;
+        ConnectionAccepted = false;
+        DenyReason = reason;
+        LogWarning($"DenyConnection account={attempt.AccountId} match={attempt.MatchSessionId} reason={reason}");
+        return Task.CompletedTask;
     }
 
-    foreach (var player in health.Players.Where(p => p.AccountId == options.AccountId))
+    public Task AcceptConnectionAsync(PlayerConnectionAttempt attempt, CancellationToken cancellationToken)
     {
-        Console.WriteLine($"Health: account={player.AccountId}, status={player.Status}, action={player.RecommendedAction}");
-    }
-}
-
-static async Task PrintActionsAsync(HttpClient http, AgentOptions options, JsonSerializerOptions jsonOptions)
-{
-    var actions = await http.GetFromJsonAsync<List<EnforcementAction>>(
-        $"v1/enforcement/actions/{options.MatchSessionId}/pending?accountId={options.AccountId}",
-        jsonOptions);
-    if (actions is null || actions.Count == 0)
-    {
-        return;
+        ConnectionAccepted = true;
+        LogInfo($"AcceptConnection account={attempt.AccountId} match={attempt.MatchSessionId}");
+        return Task.CompletedTask;
     }
 
-    foreach (var action in actions.Take(3))
+    public Task ApplyEnforcementActionAsync(EnforcementAction action, CancellationToken cancellationToken)
     {
+        AppliedActions.Add(action);
         Console.WriteLine($"Action: {action.ActionType} ({action.ReasonCode}) at {action.CreatedAtUtc:O}");
-        var ackResponse = await http.PostAsJsonAsync(
-            "v1/enforcement/actions/ack",
-            new EnforcementActionAckRequest(
-                action.ActionId,
-                action.MatchSessionId,
-                action.AccountId,
-                options.ExecutorId,
-                Result: "applied",
-                Notes: "Applied by simulator",
-                AckedAtUtc: DateTimeOffset.UtcNow),
-            jsonOptions);
-        ackResponse.EnsureSuccessStatusCode();
+        return Task.CompletedTask;
+    }
+
+    public void LogInfo(string message) => Console.WriteLine($"[INFO] {message}");
+    public void LogWarning(string message) => Console.WriteLine($"[WARN] {message}");
+
+    public void LogError(string message, Exception? exception = null)
+    {
+        if (exception is null)
+        {
+            Console.WriteLine($"[ERROR] {message}");
+            return;
+        }
+
+        Console.WriteLine($"[ERROR] {message} :: {exception.GetType().Name}: {exception.Message}");
     }
 }
 
@@ -192,6 +166,8 @@ internal sealed class AgentOptions
     public string WeaponId { get; private set; } = "ak47";
     public int RuntimeSec { get; private set; } = 30;
     public int TickIntervalSec { get; private set; } = 2;
+    public int MaxBatchSize { get; private set; } = 64;
+    public int FlushSec { get; private set; } = 3;
     public long StartTick { get; private set; } = 1000;
     public bool SimulateCheat { get; private set; }
 
@@ -232,6 +208,12 @@ internal sealed class AgentOptions
                     break;
                 case "--runtime-sec":
                     options.RuntimeSec = int.Parse(ReadValue(args, ++i, "--runtime-sec"));
+                    break;
+                case "--max-batch-size":
+                    options.MaxBatchSize = int.Parse(ReadValue(args, ++i, "--max-batch-size"));
+                    break;
+                case "--flush-sec":
+                    options.FlushSec = int.Parse(ReadValue(args, ++i, "--flush-sec"));
                     break;
             }
         }

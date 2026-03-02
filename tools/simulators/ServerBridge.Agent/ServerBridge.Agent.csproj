@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Cs2.Plugin.CounterStrikeSharp\Cs2.Plugin.CounterStrikeSharp.csproj" />
     <ProjectReference Include="..\..\..\src\Shared.Contracts\Shared.Contracts.csproj" />
   </ItemGroup>
 

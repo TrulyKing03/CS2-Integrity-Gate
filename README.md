@@ -200,12 +200,12 @@ Main capabilities:
 
 Main capabilities:
 
-- Simulates server-side gate behavior.
-- Validates join token like a real plugin should.
-- Sends synthetic telemetry.
-- Reads health and enforcement action streams.
+- Simulates server-side gate behavior through `Cs2.Plugin.CounterStrikeSharp` runtime.
+- Uses host-bridge callbacks for allow/deny/action handling.
+- Sends synthetic telemetry via runtime buffering and flush path.
+- Polls pending actions and sends action acknowledgments.
 
-Use this as the protocol reference adapter before binding to a real CS2 plugin.
+Use this as the runtime integration reference before binding to a real CS2 plugin host.
 ## `Cs2.Plugin.CounterStrikeSharp`
 
 Main capabilities:
