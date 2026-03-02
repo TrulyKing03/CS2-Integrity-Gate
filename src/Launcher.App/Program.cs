@@ -180,7 +180,8 @@ internal sealed class LauncherOptions
     public bool DryRun { get; private set; } = true;
     public bool KeepRuntimeFiles { get; private set; } = false;
     public bool SelfValidateJoin { get; private set; } = false;
-    public string ServerApiKey { get; private set; } = "dev-server-api-key";
+    public string ServerApiKey { get; private set; } =
+        Environment.GetEnvironmentVariable("CS2IG_SERVER_API_KEY") ?? "dev-server-api-key";
 
     public static LauncherOptions Parse(string[] args)
     {

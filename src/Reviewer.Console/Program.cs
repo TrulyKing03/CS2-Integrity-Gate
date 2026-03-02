@@ -167,7 +167,8 @@ static void PrintUsage()
 internal sealed class CliOptions
 {
     public string BackendBaseUrl { get; private set; } = "http://localhost:5042";
-    public string InternalApiKey { get; private set; } = "dev-internal-api-key";
+    public string InternalApiKey { get; private set; } =
+        Environment.GetEnvironmentVariable("CS2IG_INTERNAL_API_KEY") ?? "dev-internal-api-key";
     public string Command { get; private set; } = string.Empty;
     public string? MatchSessionId { get; private set; }
     public string? AccountId { get; private set; }

@@ -396,6 +396,12 @@ Production notes:
 - Replace `JoinTokenSecret` with a long random secret before any real deployment.
 - Move secrets to environment variables or secret manager.
 
+Key environment variables used by tooling:
+
+- `CS2IG_SERVER_API_KEY` (launcher self-validate and simulator default)
+- `CS2IG_INTERNAL_API_KEY` (Reviewer.Console default)
+- `ApiAuth__ServerApiKey` and `ApiAuth__InternalApiKey` (control-plane overrides)
+
 ## AC Client
 
 File: `src/AcClient.Service/appsettings.json`
@@ -438,6 +444,14 @@ Expected result:
 - Launcher acquires join token.
 - Server bridge accepts join.
 - Simulated cheat telemetry triggers rule-based actions.
+
+Reviewer end-to-end demo:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/reviewer-demo.ps1
+```
+
+This executes launcher + AC + server simulation and then runs evidence/review/ban/appeal operations through `Reviewer.Console`.
 
 ## Manual run (4 terminals)
 
@@ -574,7 +588,8 @@ No telemetry actions generated:
 |   |-- run-controlplane.ps1
 |   |-- run-ac-service.ps1
 |   |-- run-launcher.ps1
-|   `-- smoke-test.ps1
+|   |-- smoke-test.ps1
+|   `-- reviewer-demo.ps1
 |-- tools
 |   `-- simulators
 |       `-- ServerBridge.Agent
@@ -608,5 +623,6 @@ Next production steps:
 4. Add distributed infra (message bus, metrics, tracing, horizontal scaling).
 5. Add policy rollout controls and staged detector tuning.
 6. Add kernel-mode component and boot-chain attestation path if required by trust tier.
+
 
 

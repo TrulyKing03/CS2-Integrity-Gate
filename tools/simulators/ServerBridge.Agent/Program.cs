@@ -159,7 +159,8 @@ internal sealed class AgentOptions
     public string AccountId { get; private set; } = string.Empty;
     public string SteamId { get; private set; } = string.Empty;
     public string JoinToken { get; private set; } = string.Empty;
-    public string ServerApiKey { get; private set; } = "dev-server-api-key";
+    public string ServerApiKey { get; private set; } =
+        Environment.GetEnvironmentVariable("CS2IG_SERVER_API_KEY") ?? "dev-server-api-key";
     public string ExecutorId { get; private set; } = "simulator-agent";
     public string TargetAccountId { get; private set; } = "acc_enemy";
     public string TargetSteamId { get; private set; } = "76561190000000009";
