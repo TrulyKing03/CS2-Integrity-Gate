@@ -20,4 +20,4 @@ if ($SelfValidate) {
     $args += "--self-validate"
 }
 
-dotnet run --project src/Launcher.Cli -- @args
+dotnet run --project src/Launcher.App -- @args

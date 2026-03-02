@@ -33,13 +33,20 @@ This repository is a runnable MVP foundation designed for integration into your 
 
 ## Repository Overview
 
-This repo contains five .NET projects plus scripts:
+This repo contains five active .NET projects plus staged domain folders and scripts:
 
 - `src/ControlPlane.Api`: backend control plane API.
 - `src/AcClient.Service`: local anti-cheat service process.
-- `src/Launcher.Cli`: launcher orchestration CLI.
-- `src/ServerBridge.Agent`: server integration simulator/bridge.
+- `src/Launcher.App`: launcher orchestration CLI/app baseline.
+- `tools/simulators/ServerBridge.Agent`: server integration simulator/bridge.
 - `src/Shared.Contracts`: strongly typed shared contracts.
+- `src/Cs2.Plugin.CounterStrikeSharp`: reserved for real plugin integration.
+- `src/Cs2.Plugin.Metamod`: reserved for alternate plugin integration wrapper.
+- `src/Kernel.Driver`: reserved for kernel component.
+- `src/Kernel.Bridge`: reserved for user/kernel communication layer.
+- `src/Reviewer.Console`: reserved for moderation and appeals tooling.
+- `analytics/detection-tuning`: reserved for detection calibration jobs.
+- `ops/`: infrastructure, observability, security, and runbooks.
 - `scripts/`: helper scripts for startup and smoke tests.
 
 The full design spec is included in:
@@ -180,7 +187,7 @@ Main capabilities:
   - `runtime/session.json` (input from launcher)
   - `runtime/join-token.json` (output for launcher/game)
 
-## `Launcher.Cli`
+## `Launcher.App`
 
 Main capabilities:
 
@@ -189,7 +196,7 @@ Main capabilities:
 - Prints CS2 launch command with join token.
 - Optional `--self-validate` exists for diagnostics only.
 
-## `ServerBridge.Agent`
+## `tools/simulators/ServerBridge.Agent`
 
 Main capabilities:
 
@@ -377,7 +384,7 @@ dotnet run --project src/AcClient.Service
 Terminal 3:
 
 ```powershell
-dotnet run --project src/Launcher.Cli -- --backend http://localhost:5042 --account acc_local_demo --steam 76561190000000001 --keep-runtime
+dotnet run --project src/Launcher.App -- --backend http://localhost:5042 --account acc_local_demo --steam 76561190000000001 --keep-runtime
 ```
 
 Terminal 4:
@@ -385,7 +392,7 @@ Terminal 4:
 ```powershell
 $session = Get-Content runtime/session.json | ConvertFrom-Json
 $token = Get-Content runtime/join-token.json | ConvertFrom-Json
-dotnet run --project src/ServerBridge.Agent -- --backend http://localhost:5042 --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken --simulate-cheat --runtime-sec 8
+dotnet run --project tools/simulators/ServerBridge.Agent -- --backend http://localhost:5042 --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken --simulate-cheat --runtime-sec 8
 ```
 
 ## Runbook
@@ -410,7 +417,7 @@ Then rerun API + AC to regenerate state.
 
 For real CS2 server integration:
 
-1. Replace `ServerBridge.Agent` with your actual plugin/adapter.
+1. Replace `tools/simulators/ServerBridge.Agent` with your actual plugin/adapter in `src/Cs2.Plugin.CounterStrikeSharp` or `src/Cs2.Plugin.Metamod`.
 2. On connection attempt:
 - extract player token.
 - call `/v1/attestation/validate-join`.
@@ -474,17 +481,31 @@ No telemetry actions generated:
 |-- ANTICHEAT_FULL_BUILD_SPEC.md
 |-- Cs2AcStack.slnx
 |-- README.md
+|-- analytics
+|   `-- detection-tuning
+|-- ops
+|   |-- infra
+|   |-- observability
+|   |-- security
+|   `-- runbooks
 |-- scripts
 |   |-- run-controlplane.ps1
 |   |-- run-ac-service.ps1
 |   |-- run-launcher.ps1
 |   `-- smoke-test.ps1
+|-- tools
+|   `-- simulators
+|       `-- ServerBridge.Agent
 `-- src
     |-- Shared.Contracts
     |-- ControlPlane.Api
     |-- AcClient.Service
-    |-- Launcher.Cli
-    `-- ServerBridge.Agent
+    |-- Launcher.App
+    |-- Cs2.Plugin.CounterStrikeSharp
+    |-- Cs2.Plugin.Metamod
+    |-- Kernel.Driver
+    |-- Kernel.Bridge
+    `-- Reviewer.Console
 ```
 
 ## Current Scope and Roadmap
@@ -505,3 +526,4 @@ Next production steps:
 4. Add distributed infra (message bus, metrics, tracing, horizontal scaling).
 5. Add policy rollout controls and staged detector tuning.
 6. Add kernel-mode component and boot-chain attestation path if required by trust tier.
+
