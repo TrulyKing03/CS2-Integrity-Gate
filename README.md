@@ -246,6 +246,7 @@ System:
 
 - `GET /`
 - `GET /healthz`
+- `GET /v1/policy/current`
 
 Auth + Queue:
 
@@ -259,6 +260,11 @@ Attestation:
 - `POST /v1/attestation/heartbeat`
 - `POST /v1/attestation/validate-join`
 - `GET /v1/attestation/match-health?matchSessionId=...`
+
+Queue-tier enforcement behavior:
+
+- `standard` queue: Tier A posture required (`SecureBoot`, `TPM 2.0`).
+- `high_trust` queue: Tier A + configured Tier B requirements (currently IOMMU and optional VBS depending on policy).
 
 Telemetry:
 

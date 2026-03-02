@@ -36,6 +36,21 @@ app.MapGet("/", () => Results.Ok(new
 
 app.MapGet("/healthz", () => Results.Ok(new { ok = true, utc = DateTimeOffset.UtcNow }));
 
+app.MapGet("/v1/policy/current", (
+    IOptions<AcPolicyOptions> policyOptions) =>
+{
+    var policy = policyOptions.Value;
+    return Results.Ok(new
+    {
+        policyVersion = policy.PolicyVersion,
+        defaultQueueTier = policy.DefaultQueueTier,
+        heartbeatIntervalSec = policy.HeartbeatIntervalSec,
+        graceWindowSec = policy.GraceWindowSec,
+        requiredTierA = policy.RequiredTierA,
+        requiredTierB = policy.RequiredTierB
+    });
+});
+
 app.MapPost("/v1/auth/login", async (
     LoginRequest request,
     ISqliteStore store,
@@ -133,6 +148,20 @@ app.MapPost("/v1/attestation/match-start", async (
         return Results.BadRequest(new { error = "tier_a_requirements_not_met" });
     }
 
+    var queueType = await store.GetQueueTypeForMatchAsync(request.MatchSessionId, cancellationToken) ?? "standard";
+    if (string.Equals(queueType, "high_trust", StringComparison.OrdinalIgnoreCase))
+    {
+        if (policyOptions.Value.RequiredTierB.Iommu && !request.PlatformSignals.Iommu)
+        {
+            return Results.BadRequest(new { error = "tier_b_iommu_required_for_high_trust" });
+        }
+
+        if (policyOptions.Value.RequiredTierB.Vbs && !request.PlatformSignals.Vbs)
+        {
+            return Results.BadRequest(new { error = "tier_b_vbs_required_for_high_trust" });
+        }
+    }
+
     if (!request.IntegritySignals.AcServiceHealthy ||
         !request.IntegritySignals.ModulePolicyOk ||
         !request.IntegritySignals.DriverLoaded)
@@ -174,7 +203,7 @@ app.MapPost("/v1/attestation/match-start", async (
         policyOptions.Value.JoinTokenTtlSec,
         policyOptions.Value.HeartbeatIntervalSec,
         policyOptions.Value.GraceWindowSec,
-        policyOptions.Value.DefaultQueueTier));
+        queueType));
 });
 
 app.MapPost("/v1/attestation/heartbeat", async (

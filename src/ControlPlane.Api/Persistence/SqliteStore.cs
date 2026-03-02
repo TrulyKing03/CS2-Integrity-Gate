@@ -21,6 +21,7 @@ public interface ISqliteStore
     Task<bool> IsMatchPlayerAsync(string matchSessionId, string accountId, string steamId, CancellationToken cancellationToken);
     Task<string?> GetSteamIdForMatchPlayerAsync(string matchSessionId, string accountId, CancellationToken cancellationToken);
     Task<string?> GetServerIdForMatchAsync(string matchSessionId, CancellationToken cancellationToken);
+    Task<string?> GetQueueTypeForMatchAsync(string matchSessionId, CancellationToken cancellationToken);
     Task SaveJoinTokenAsync(JoinTokenPayload payload, CancellationToken cancellationToken);
     Task<JoinTokenDbRecord?> GetJoinTokenAsync(string jti, CancellationToken cancellationToken);
     Task MarkJoinTokenUsedAsync(string jti, CancellationToken cancellationToken);
@@ -457,6 +458,22 @@ public sealed class SqliteStore : ISqliteStore
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             SELECT server_id
+            FROM match_sessions
+            WHERE match_session_id = $match_session_id
+            LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("$match_session_id", matchSessionId);
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return result as string;
+    }
+
+    public async Task<string?> GetQueueTypeForMatchAsync(string matchSessionId, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT queue_type
             FROM match_sessions
             WHERE match_session_id = $match_session_id
             LIMIT 1;
