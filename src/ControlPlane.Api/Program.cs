@@ -12,6 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<AcPolicyOptions>(builder.Configuration.GetSection(AcPolicyOptions.SectionName));
+builder.Services.Configure<ApiAuthOptions>(builder.Configuration.GetSection(ApiAuthOptions.SectionName));
 builder.Services.AddSingleton<ISqliteStore, SqliteStore>();
 builder.Services.AddSingleton<IJoinTokenService, JoinTokenService>();
 builder.Services.AddSingleton<IDetectionEngine, DetectionEngine>();
@@ -216,11 +217,19 @@ app.MapPost("/v1/attestation/heartbeat", async (
 
 app.MapPost("/v1/attestation/validate-join", async (
     ValidateJoinRequest request,
+    HttpContext context,
     ISqliteStore store,
     IJoinTokenService tokenService,
+    IOptions<ApiAuthOptions> apiAuthOptions,
     IOptions<AcPolicyOptions> policyOptions,
     CancellationToken cancellationToken) =>
 {
+    var authFailure = EnsureServerAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
     if (!tokenService.TryValidate(request.JoinToken, out var payload, out var reason) || payload is null)
     {
         return Results.Ok(new ValidateJoinResponse(false, reason ?? "invalid_token", "unknown", "unknown"));
@@ -268,10 +277,18 @@ app.MapPost("/v1/attestation/validate-join", async (
 
 app.MapGet("/v1/attestation/match-health", async (
     string matchSessionId,
+    HttpContext context,
     ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
     IOptions<AcPolicyOptions> options,
     CancellationToken cancellationToken) =>
 {
+    var authFailure = EnsureServerAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
     var rows = await store.GetMatchHealthAsync(matchSessionId, cancellationToken);
     var staleCutoff = DateTimeOffset.UtcNow.AddSeconds(-options.Value.GraceWindowSec);
     var normalized = rows
@@ -291,10 +308,18 @@ app.MapGet("/v1/attestation/match-health", async (
 
 app.MapPost("/v1/telemetry/ticks", async (
     TelemetryEnvelope<TickPlayerState> envelope,
+    HttpContext context,
     ISqliteStore store,
     IDetectionEngine detectionEngine,
+    IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
+    var authFailure = EnsureServerAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
     await store.AddTelemetryEventsAsync(
         envelope.MatchSessionId,
         "tick_player_state_v1",
@@ -310,10 +335,18 @@ app.MapPost("/v1/telemetry/ticks", async (
 
 app.MapPost("/v1/telemetry/shots", async (
     TelemetryEnvelope<ShotEvent> envelope,
+    HttpContext context,
     ISqliteStore store,
     IDetectionEngine detectionEngine,
+    IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
+    var authFailure = EnsureServerAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
     await store.AddTelemetryEventsAsync(
         envelope.MatchSessionId,
         "shot_event_v1",
@@ -329,10 +362,18 @@ app.MapPost("/v1/telemetry/shots", async (
 
 app.MapPost("/v1/telemetry/los", async (
     TelemetryEnvelope<LosSample> envelope,
+    HttpContext context,
     ISqliteStore store,
     IDetectionEngine detectionEngine,
+    IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
+    var authFailure = EnsureServerAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
     await store.AddTelemetryEventsAsync(
         envelope.MatchSessionId,
         "los_sample_v1",
@@ -358,11 +399,55 @@ app.MapGet("/v1/detections/scores/{matchSessionId}/{accountId}", async (
 
 app.MapGet("/v1/enforcement/actions/{matchSessionId}", async (
     string matchSessionId,
+    HttpContext context,
     ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
+    var authFailure = EnsureServerAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
     var actions = await store.GetEnforcementActionsAsync(matchSessionId, cancellationToken);
     return Results.Ok(actions);
+});
+
+app.MapGet("/v1/enforcement/actions/{matchSessionId}/pending", async (
+    string matchSessionId,
+    string? accountId,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureServerAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var actions = await store.GetPendingEnforcementActionsAsync(matchSessionId, accountId, cancellationToken);
+    return Results.Ok(actions);
+});
+
+app.MapPost("/v1/enforcement/actions/ack", async (
+    EnforcementActionAckRequest request,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureServerAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var accepted = await store.AcknowledgeEnforcementActionAsync(request, cancellationToken);
+    var reason = accepted ? "accepted" : "already_acked";
+    return Results.Ok(new EnforcementActionAckResponse(accepted, reason, DateTimeOffset.UtcNow));
 });
 
 app.Run();
@@ -425,4 +510,16 @@ static string NormalizeQueueType(string queueType)
 
     var normalized = queueType.Trim().ToLowerInvariant();
     return normalized is "high_trust" or "standard" ? normalized : "high_trust";
+}
+
+static IResult? EnsureServerAuthorized(HttpContext context, ApiAuthOptions options)
+{
+    if (!context.Request.Headers.TryGetValue("X-Server-Api-Key", out var provided) ||
+        string.IsNullOrWhiteSpace(provided) ||
+        !string.Equals(provided.ToString(), options.ServerApiKey, StringComparison.Ordinal))
+    {
+        return Results.Unauthorized();
+    }
+
+    return null;
 }

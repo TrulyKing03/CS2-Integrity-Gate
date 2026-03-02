@@ -1,13 +1,12 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/AcClient.Service/AcClient.Service.csproj" />
+    <Project Path="src/Cs2.Plugin.CounterStrikeSharp/Cs2.Plugin.CounterStrikeSharp.csproj" />
     <Project Path="src/ControlPlane.Api/ControlPlane.Api.csproj" />
     <Project Path="src/Launcher.App/Launcher.App.csproj" />
     <Project Path="src/Shared.Contracts/Shared.Contracts.csproj" />
   </Folder>
   <Folder Name="/tools/">
-    <Folder Name="/tools/simulators/">
-      <Project Path="tools/simulators/ServerBridge.Agent/ServerBridge.Agent.csproj" />
-    </Folder>
+    <Project Path="tools/simulators/ServerBridge.Agent/ServerBridge.Agent.csproj" />
   </Folder>
 </Solution>

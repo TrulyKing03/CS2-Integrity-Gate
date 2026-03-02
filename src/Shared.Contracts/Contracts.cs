@@ -156,6 +156,20 @@ public sealed record EnforcementAction(
     int DurationSeconds,
     DateTimeOffset CreatedAtUtc);
 
+public sealed record EnforcementActionAckRequest(
+    string ActionId,
+    string MatchSessionId,
+    string AccountId,
+    string ExecutorId,
+    string Result,
+    string Notes,
+    DateTimeOffset AckedAtUtc);
+
+public sealed record EnforcementActionAckResponse(
+    bool Accepted,
+    string Reason,
+    DateTimeOffset ReceivedAtUtc);
+
 public sealed record QueueSessionState(
     string AccountId,
     string SteamId,

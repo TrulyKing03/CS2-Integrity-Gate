@@ -53,6 +53,8 @@ public interface ISqliteStore
     Task<IReadOnlyList<SuspicionScoreUpdate>> GetSuspicionScoresAsync(string matchSessionId, string accountId, CancellationToken cancellationToken);
     Task AddEnforcementActionAsync(EnforcementAction action, string detailsJson, CancellationToken cancellationToken);
     Task<IReadOnlyList<EnforcementAction>> GetEnforcementActionsAsync(string matchSessionId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<EnforcementAction>> GetPendingEnforcementActionsAsync(string matchSessionId, string? accountId, CancellationToken cancellationToken);
+    Task<bool> AcknowledgeEnforcementActionAsync(EnforcementActionAckRequest request, CancellationToken cancellationToken);
 }
 
 public sealed record JoinTokenDbRecord(string Jti, string PayloadJson, DateTimeOffset? UsedAtUtc);
@@ -205,6 +207,16 @@ public sealed class SqliteStore : ISqliteStore
                 duration_seconds INTEGER NOT NULL,
                 created_at_utc TEXT NOT NULL,
                 details_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS enforcement_action_acks (
+                action_id TEXT PRIMARY KEY,
+                match_session_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                executor_id TEXT NOT NULL,
+                result TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                acked_at_utc TEXT NOT NULL
             );
             """;
         await cmd.ExecuteNonQueryAsync(cancellationToken);
@@ -726,5 +738,83 @@ public sealed class SqliteStore : ISqliteStore
         }
 
         return result;
+    }
+
+    public async Task<IReadOnlyList<EnforcementAction>> GetPendingEnforcementActionsAsync(
+        string matchSessionId,
+        string? accountId,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<EnforcementAction>();
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+
+        var query = """
+            SELECT ea.action_id, ea.match_session_id, ea.account_id, ea.action_type, ea.reason_code, ea.duration_seconds, ea.created_at_utc
+            FROM enforcement_actions ea
+            LEFT JOIN enforcement_action_acks ack
+                ON ack.action_id = ea.action_id
+            WHERE ea.match_session_id = $match_session_id
+              AND ack.action_id IS NULL
+            """;
+        if (!string.IsNullOrWhiteSpace(accountId))
+        {
+            query += """
+            
+              AND ea.account_id = $account_id
+            """;
+            cmd.Parameters.AddWithValue("$account_id", accountId);
+        }
+
+        query += """
+            
+            ORDER BY ea.created_at_utc DESC;
+            """;
+        cmd.CommandText = query;
+        cmd.Parameters.AddWithValue("$match_session_id", matchSessionId);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new EnforcementAction(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetInt32(5),
+                DateTimeOffset.Parse(reader.GetString(6))));
+        }
+
+        return result;
+    }
+
+    public async Task<bool> AcknowledgeEnforcementActionAsync(
+        EnforcementActionAckRequest request,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO enforcement_action_acks (
+                action_id, match_session_id, account_id, executor_id, result, notes, acked_at_utc
+            )
+            VALUES (
+                $action_id, $match_session_id, $account_id, $executor_id, $result, $notes, $acked_at_utc
+            )
+            ON CONFLICT(action_id) DO NOTHING;
+            """;
+        cmd.Parameters.AddWithValue("$action_id", request.ActionId);
+        cmd.Parameters.AddWithValue("$match_session_id", request.MatchSessionId);
+        cmd.Parameters.AddWithValue("$account_id", request.AccountId);
+        cmd.Parameters.AddWithValue("$executor_id", request.ExecutorId);
+        cmd.Parameters.AddWithValue("$result", request.Result);
+        cmd.Parameters.AddWithValue("$notes", request.Notes);
+        cmd.Parameters.AddWithValue("$acked_at_utc", request.AckedAtUtc.ToString("O"));
+
+        var affected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        return affected > 0;
     }
 }

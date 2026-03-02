@@ -33,14 +33,14 @@ This repository is a runnable MVP foundation designed for integration into your 
 
 ## Repository Overview
 
-This repo contains five active .NET projects plus staged domain folders and scripts:
+This repo contains six active .NET projects plus staged domain folders and scripts:
 
 - `src/ControlPlane.Api`: backend control plane API.
 - `src/AcClient.Service`: local anti-cheat service process.
 - `src/Launcher.App`: launcher orchestration CLI/app baseline.
 - `tools/simulators/ServerBridge.Agent`: server integration simulator/bridge.
 - `src/Shared.Contracts`: strongly typed shared contracts.
-- `src/Cs2.Plugin.CounterStrikeSharp`: reserved for real plugin integration.
+- `src/Cs2.Plugin.CounterStrikeSharp`: plugin adapter runtime scaffold (join gate, telemetry, health/action polling, ack flow).
 - `src/Cs2.Plugin.Metamod`: reserved for alternate plugin integration wrapper.
 - `src/Kernel.Driver`: reserved for kernel component.
 - `src/Kernel.Bridge`: reserved for user/kernel communication layer.
@@ -206,6 +206,18 @@ Main capabilities:
 - Reads health and enforcement action streams.
 
 Use this as the protocol reference adapter before binding to a real CS2 plugin.
+## `Cs2.Plugin.CounterStrikeSharp`
+
+Main capabilities:
+
+- Runtime orchestrator for real plugin binding:
+  - join validation on connect attempt,
+  - telemetry buffering and flush,
+  - match-health polling and transition-based enforcement,
+  - pending-action polling and acknowledgment.
+- Typed backend client with server API-key auth header.
+- Host bridge abstraction (`IPluginHostBridge`) so game-framework glue remains isolated.
+- CounterStrikeSharp adapter skeleton ready for event-hook wiring.
 
 ## `Shared.Contracts`
 
@@ -249,6 +261,17 @@ Detection/Enforcement read APIs:
 
 - `GET /v1/detections/scores/{matchSessionId}/{accountId}`
 - `GET /v1/enforcement/actions/{matchSessionId}`
+- `GET /v1/enforcement/actions/{matchSessionId}/pending?accountId=...`
+- `POST /v1/enforcement/actions/ack`
+
+
+Server-auth protected endpoints:
+
+- Require header `X-Server-Api-Key`:
+  - `/v1/attestation/validate-join`
+  - `/v1/attestation/match-health`
+  - `/v1/telemetry/*`
+  - `/v1/enforcement/actions/*`
 
 ## Telemetry and Detection
 
@@ -290,6 +313,7 @@ Tables created automatically by `SqliteStore.InitializeAsync`:
 - `telemetry_events`
 - `suspicion_scores`
 - `enforcement_actions`
+- `enforcement_action_acks`
 
 Data captured:
 
@@ -318,6 +342,8 @@ Key sections:
 - `AcPolicy.PolicyVersion`
 - `AcPolicy.RequiredTierA`
 - `AcPolicy.RequiredTierB`
+- `ApiAuth.ServerApiKey`
+- `ApiAuth.InternalApiKey`
 
 Production notes:
 
@@ -417,7 +443,7 @@ Then rerun API + AC to regenerate state.
 
 For real CS2 server integration:
 
-1. Replace `tools/simulators/ServerBridge.Agent` with your actual plugin/adapter in `src/Cs2.Plugin.CounterStrikeSharp` or `src/Cs2.Plugin.Metamod`.
+1. Bind your real CS2 hooks to `src/Cs2.Plugin.CounterStrikeSharp` runtime methods (or mirror this flow in `src/Cs2.Plugin.Metamod`).
 2. On connection attempt:
 - extract player token.
 - call `/v1/attestation/validate-join`.
@@ -425,7 +451,7 @@ For real CS2 server integration:
 3. During match:
 - push tick/shot/LoS telemetry in batches.
 - poll `/v1/attestation/match-health`.
-- consume `/v1/enforcement/actions/{matchSessionId}`.
+- consume `/v1/enforcement/actions/{matchSessionId}/pending` and ack via `/v1/enforcement/actions/ack`.
 
 For real launcher integration:
 
@@ -526,4 +552,5 @@ Next production steps:
 4. Add distributed infra (message bus, metrics, tracing, horizontal scaling).
 5. Add policy rollout controls and staged detector tuning.
 6. Add kernel-mode component and boot-chain attestation path if required by trust tier.
+
 

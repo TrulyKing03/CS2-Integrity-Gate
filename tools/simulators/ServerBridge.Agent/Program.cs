@@ -9,6 +9,7 @@ using var http = new HttpClient
 {
     BaseAddress = new Uri(options.BackendBaseUrl.TrimEnd('/') + "/")
 };
+http.DefaultRequestHeaders.Add("X-Server-Api-Key", options.ServerApiKey);
 
 var validateRequest = new ValidateJoinRequest(
     options.ServerId,
@@ -151,16 +152,28 @@ static async Task PrintHealthAsync(HttpClient http, AgentOptions options, JsonSe
 static async Task PrintActionsAsync(HttpClient http, AgentOptions options, JsonSerializerOptions jsonOptions)
 {
     var actions = await http.GetFromJsonAsync<List<EnforcementAction>>(
-        $"v1/enforcement/actions/{options.MatchSessionId}",
+        $"v1/enforcement/actions/{options.MatchSessionId}/pending?accountId={options.AccountId}",
         jsonOptions);
     if (actions is null || actions.Count == 0)
     {
         return;
     }
 
-    foreach (var action in actions.Where(a => a.AccountId == options.AccountId).Take(3))
+    foreach (var action in actions.Take(3))
     {
         Console.WriteLine($"Action: {action.ActionType} ({action.ReasonCode}) at {action.CreatedAtUtc:O}");
+        var ackResponse = await http.PostAsJsonAsync(
+            "v1/enforcement/actions/ack",
+            new EnforcementActionAckRequest(
+                action.ActionId,
+                action.MatchSessionId,
+                action.AccountId,
+                options.ExecutorId,
+                Result: "applied",
+                Notes: "Applied by simulator",
+                AckedAtUtc: DateTimeOffset.UtcNow),
+            jsonOptions);
+        ackResponse.EnsureSuccessStatusCode();
     }
 }
 
@@ -172,6 +185,8 @@ internal sealed class AgentOptions
     public string AccountId { get; private set; } = string.Empty;
     public string SteamId { get; private set; } = string.Empty;
     public string JoinToken { get; private set; } = string.Empty;
+    public string ServerApiKey { get; private set; } = "dev-server-api-key";
+    public string ExecutorId { get; private set; } = "simulator-agent";
     public string TargetAccountId { get; private set; } = "acc_enemy";
     public string TargetSteamId { get; private set; } = "76561190000000009";
     public string WeaponId { get; private set; } = "ak47";
@@ -205,6 +220,12 @@ internal sealed class AgentOptions
                     break;
                 case "--token":
                     options.JoinToken = ReadValue(args, ++i, "--token");
+                    break;
+                case "--server-api-key":
+                    options.ServerApiKey = ReadValue(args, ++i, "--server-api-key");
+                    break;
+                case "--executor-id":
+                    options.ExecutorId = ReadValue(args, ++i, "--executor-id");
                     break;
                 case "--simulate-cheat":
                     options.SimulateCheat = true;

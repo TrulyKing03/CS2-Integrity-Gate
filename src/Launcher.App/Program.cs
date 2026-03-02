@@ -71,6 +71,8 @@ if (joinTokenData is null)
 
 if (options.SelfValidateJoin)
 {
+    http.DefaultRequestHeaders.Remove("X-Server-Api-Key");
+    http.DefaultRequestHeaders.Add("X-Server-Api-Key", options.ServerApiKey);
     var validateRequest = new ValidateJoinRequest(
         queue.ServerId,
         steamId,
@@ -178,6 +180,7 @@ internal sealed class LauncherOptions
     public bool DryRun { get; private set; } = true;
     public bool KeepRuntimeFiles { get; private set; } = false;
     public bool SelfValidateJoin { get; private set; } = false;
+    public string ServerApiKey { get; private set; } = "dev-server-api-key";
 
     public static LauncherOptions Parse(string[] args)
     {
@@ -222,6 +225,9 @@ internal sealed class LauncherOptions
                     break;
                 case "--self-validate":
                     options.SelfValidateJoin = true;
+                    break;
+                case "--server-api-key":
+                    options.ServerApiKey = ReadValue(args, ++i, "--server-api-key");
                     break;
             }
         }
