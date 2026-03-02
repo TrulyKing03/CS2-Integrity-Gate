@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AcClient.Service/AcClient.Service.csproj" />
+    <Project Path="src/ControlPlane.Api/ControlPlane.Api.csproj" />
+    <Project Path="src/Launcher.Cli/Launcher.Cli.csproj" />
+    <Project Path="src/ServerBridge.Agent/ServerBridge.Agent.csproj" />
+    <Project Path="src/Shared.Contracts/Shared.Contracts.csproj" />
+  </Folder>
+</Solution>
