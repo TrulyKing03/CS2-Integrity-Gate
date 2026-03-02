@@ -4,6 +4,7 @@
     <Project Path="src/Cs2.Plugin.CounterStrikeSharp/Cs2.Plugin.CounterStrikeSharp.csproj" />
     <Project Path="src/ControlPlane.Api/ControlPlane.Api.csproj" />
     <Project Path="src/Launcher.App/Launcher.App.csproj" />
+    <Project Path="src/Reviewer.Console/Reviewer.Console.csproj" />
     <Project Path="src/Shared.Contracts/Shared.Contracts.csproj" />
   </Folder>
   <Folder Name="/tools/">

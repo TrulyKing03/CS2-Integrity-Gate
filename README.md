@@ -44,7 +44,7 @@ This repo contains six active .NET projects plus staged domain folders and scrip
 - `src/Cs2.Plugin.Metamod`: reserved for alternate plugin integration wrapper.
 - `src/Kernel.Driver`: reserved for kernel component.
 - `src/Kernel.Bridge`: reserved for user/kernel communication layer.
-- `src/Reviewer.Console`: reserved for moderation and appeals tooling.
+- `src/Reviewer.Console`: moderation and appeals CLI for internal endpoints.
 - `analytics/detection-tuning`: reserved for detection calibration jobs.
 - `ops/`: infrastructure, observability, security, and runbooks.
 - `scripts/`: helper scripts for startup and smoke tests.
@@ -228,6 +228,15 @@ Central shared DTO contract library used by all services:
 - Join validation DTOs.
 - Telemetry DTOs (`TickPlayerState`, `ShotEvent`, `LosSample`).
 - Detection score and enforcement action DTOs.
+
+## `Reviewer.Console`
+
+Main capabilities:
+
+- Internal moderation CLI with `X-Internal-Api-Key` auth.
+- Evidence listing and lookup.
+- Review-case creation and status updates.
+- Ban creation and appeal lifecycle handling.
 
 ## API Surface
 
@@ -450,6 +459,13 @@ Terminal 4:
 $session = Get-Content runtime/session.json | ConvertFrom-Json
 $token = Get-Content runtime/join-token.json | ConvertFrom-Json
 dotnet run --project tools/simulators/ServerBridge.Agent -- --backend http://localhost:5042 --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken --simulate-cheat --runtime-sec 8
+```
+
+Reviewer workflow examples:
+
+```powershell
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open
 ```
 
 ## Runbook
