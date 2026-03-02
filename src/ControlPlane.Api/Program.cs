@@ -13,9 +13,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<AcPolicyOptions>(builder.Configuration.GetSection(AcPolicyOptions.SectionName));
 builder.Services.Configure<ApiAuthOptions>(builder.Configuration.GetSection(ApiAuthOptions.SectionName));
+builder.Services.Configure<EvidenceOptions>(builder.Configuration.GetSection(EvidenceOptions.SectionName));
 builder.Services.AddSingleton<ISqliteStore, SqliteStore>();
 builder.Services.AddSingleton<IJoinTokenService, JoinTokenService>();
 builder.Services.AddSingleton<IDetectionEngine, DetectionEngine>();
+builder.Services.AddSingleton<IEvidenceService, EvidenceService>();
 builder.Services.AddHostedService<StartupInitializer>();
 
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -311,6 +313,7 @@ app.MapPost("/v1/telemetry/ticks", async (
     HttpContext context,
     ISqliteStore store,
     IDetectionEngine detectionEngine,
+    IEvidenceService evidenceService,
     IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
@@ -329,7 +332,7 @@ app.MapPost("/v1/telemetry/ticks", async (
         cancellationToken);
 
     var result = detectionEngine.ProcessTicks(envelope);
-    await PersistDetectionResultAsync(result, store, cancellationToken);
+    await PersistDetectionResultAsync(result, envelope.MatchSessionId, store, evidenceService, cancellationToken);
     return Results.Ok(new { ingested = envelope.Items.Count, scores = result.ScoreUpdates.Count, actions = result.EnforcementActions.Count });
 });
 
@@ -338,6 +341,7 @@ app.MapPost("/v1/telemetry/shots", async (
     HttpContext context,
     ISqliteStore store,
     IDetectionEngine detectionEngine,
+    IEvidenceService evidenceService,
     IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
@@ -356,7 +360,7 @@ app.MapPost("/v1/telemetry/shots", async (
         cancellationToken);
 
     var result = detectionEngine.ProcessShots(envelope);
-    await PersistDetectionResultAsync(result, store, cancellationToken);
+    await PersistDetectionResultAsync(result, envelope.MatchSessionId, store, evidenceService, cancellationToken);
     return Results.Ok(new { ingested = envelope.Items.Count, scores = result.ScoreUpdates.Count, actions = result.EnforcementActions.Count });
 });
 
@@ -365,6 +369,7 @@ app.MapPost("/v1/telemetry/los", async (
     HttpContext context,
     ISqliteStore store,
     IDetectionEngine detectionEngine,
+    IEvidenceService evidenceService,
     IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
@@ -383,7 +388,7 @@ app.MapPost("/v1/telemetry/los", async (
         cancellationToken);
 
     var result = detectionEngine.ProcessLosSamples(envelope);
-    await PersistDetectionResultAsync(result, store, cancellationToken);
+    await PersistDetectionResultAsync(result, envelope.MatchSessionId, store, evidenceService, cancellationToken);
     return Results.Ok(new { ingested = envelope.Items.Count });
 });
 
@@ -450,11 +455,192 @@ app.MapPost("/v1/enforcement/actions/ack", async (
     return Results.Ok(new EnforcementActionAckResponse(accepted, reason, DateTimeOffset.UtcNow));
 });
 
+app.MapGet("/v1/evidence", async (
+    string? matchSessionId,
+    string? accountId,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var evidence = await store.ListEvidencePackSummariesAsync(matchSessionId, accountId, cancellationToken);
+    return Results.Ok(evidence);
+});
+
+app.MapGet("/v1/evidence/{evidenceId}", async (
+    string evidenceId,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var evidence = await store.GetEvidencePackSummaryAsync(evidenceId, cancellationToken);
+    return evidence is null
+        ? Results.NotFound(new { error = "evidence_not_found" })
+        : Results.Ok(evidence);
+});
+
+app.MapPost("/v1/review/cases", async (
+    CreateReviewCaseRequest request,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var created = await store.CreateReviewCaseAsync(request, cancellationToken);
+    return Results.Ok(created);
+});
+
+app.MapGet("/v1/review/cases", async (
+    string? status,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var cases = await store.ListReviewCasesAsync(status, cancellationToken);
+    return Results.Ok(cases);
+});
+
+app.MapPost("/v1/review/cases/update", async (
+    UpdateReviewCaseRequest request,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var updated = await store.UpdateReviewCaseAsync(request, cancellationToken);
+    return updated is null
+        ? Results.NotFound(new { error = "review_case_not_found" })
+        : Results.Ok(updated);
+});
+
+app.MapPost("/v1/moderation/bans", async (
+    CreateBanRequest request,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var ban = await store.CreateBanAsync(request, cancellationToken);
+    return Results.Ok(ban);
+});
+
+app.MapGet("/v1/moderation/bans/{banId}", async (
+    string banId,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var ban = await store.GetBanAsync(banId, cancellationToken);
+    return ban is null
+        ? Results.NotFound(new { error = "ban_not_found" })
+        : Results.Ok(ban);
+});
+
+app.MapPost("/v1/moderation/appeals", async (
+    CreateAppealRequest request,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var appeal = await store.CreateAppealAsync(request, cancellationToken);
+    return Results.Ok(appeal);
+});
+
+app.MapGet("/v1/moderation/appeals", async (
+    string? status,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var appeals = await store.ListAppealsAsync(status, cancellationToken);
+    return Results.Ok(appeals);
+});
+
+app.MapPost("/v1/moderation/appeals/resolve", async (
+    ResolveAppealRequest request,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var updated = await store.ResolveAppealAsync(request, cancellationToken);
+    return updated is null
+        ? Results.NotFound(new { error = "appeal_not_found" })
+        : Results.Ok(updated);
+});
+
 app.Run();
 
 static async Task PersistDetectionResultAsync(
     DetectionResult result,
+    string matchSessionId,
     ISqliteStore store,
+    IEvidenceService evidenceService,
     CancellationToken cancellationToken)
 {
     foreach (var update in result.ScoreUpdates)
@@ -473,6 +659,13 @@ static async Task PersistDetectionResultAsync(
               "createdAtUtc": "{{action.CreatedAtUtc:O}}"
             }
             """,
+            cancellationToken);
+
+        await evidenceService.BuildAndStoreEvidenceAsync(
+            matchSessionId,
+            action.AccountId,
+            triggerType: action.ReasonCode,
+            actionId: action.ActionId,
             cancellationToken);
     }
 }
@@ -517,6 +710,18 @@ static IResult? EnsureServerAuthorized(HttpContext context, ApiAuthOptions optio
     if (!context.Request.Headers.TryGetValue("X-Server-Api-Key", out var provided) ||
         string.IsNullOrWhiteSpace(provided) ||
         !string.Equals(provided.ToString(), options.ServerApiKey, StringComparison.Ordinal))
+    {
+        return Results.Unauthorized();
+    }
+
+    return null;
+}
+
+static IResult? EnsureInternalAuthorized(HttpContext context, ApiAuthOptions options)
+{
+    if (!context.Request.Headers.TryGetValue("X-Internal-Api-Key", out var provided) ||
+        string.IsNullOrWhiteSpace(provided) ||
+        !string.Equals(provided.ToString(), options.InternalApiKey, StringComparison.Ordinal))
     {
         return Results.Unauthorized();
     }

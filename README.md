@@ -264,6 +264,19 @@ Detection/Enforcement read APIs:
 - `GET /v1/enforcement/actions/{matchSessionId}/pending?accountId=...`
 - `POST /v1/enforcement/actions/ack`
 
+Evidence/Moderation APIs:
+
+- `GET /v1/evidence?matchSessionId=...&accountId=...`
+- `GET /v1/evidence/{evidenceId}`
+- `POST /v1/review/cases`
+- `GET /v1/review/cases?status=...`
+- `POST /v1/review/cases/update`
+- `POST /v1/moderation/bans`
+- `GET /v1/moderation/bans/{banId}`
+- `POST /v1/moderation/appeals`
+- `GET /v1/moderation/appeals?status=...`
+- `POST /v1/moderation/appeals/resolve`
+
 
 Server-auth protected endpoints:
 
@@ -272,6 +285,13 @@ Server-auth protected endpoints:
   - `/v1/attestation/match-health`
   - `/v1/telemetry/*`
   - `/v1/enforcement/actions/*`
+
+Internal-auth protected endpoints:
+
+- Require header `X-Internal-Api-Key`:
+  - `/v1/evidence/*`
+  - `/v1/review/*`
+  - `/v1/moderation/*`
 
 ## Telemetry and Detection
 
@@ -299,6 +319,7 @@ Important:
 SQLite database path (default):
 
 - `data/controlplane.db`
+- Evidence JSON output (default when running API project): `src/ControlPlane.Api/evidence/`
 
 Tables created automatically by `SqliteStore.InitializeAsync`:
 
@@ -314,6 +335,11 @@ Tables created automatically by `SqliteStore.InitializeAsync`:
 - `suspicion_scores`
 - `enforcement_actions`
 - `enforcement_action_acks`
+- `evidence_packs`
+- `review_cases`
+- `review_case_events`
+- `bans`
+- `appeals`
 
 Data captured:
 
@@ -324,6 +350,8 @@ Data captured:
 - telemetry event stream.
 - per-channel suspicion scores.
 - enforcement action records.
+- evidence pack metadata and hashes.
+- review/moderation case history.
 
 ## Configuration
 
@@ -344,6 +372,9 @@ Key sections:
 - `AcPolicy.RequiredTierB`
 - `ApiAuth.ServerApiKey`
 - `ApiAuth.InternalApiKey`
+- `Evidence.StorageDirectory`
+- `Evidence.RecentTelemetryLimit`
+- `Evidence.RecentHeartbeatsLimit`
 
 Production notes:
 
@@ -435,6 +466,7 @@ dotnet run --project tools/simulators/ServerBridge.Agent -- --backend http://loc
 
 ```powershell
 Remove-Item -Recurse -Force runtime,data -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force src/ControlPlane.Api/evidence -ErrorAction SilentlyContinue
 ```
 
 Then rerun API + AC to regenerate state.
@@ -446,10 +478,12 @@ For real CS2 server integration:
 1. Bind your real CS2 hooks to `src/Cs2.Plugin.CounterStrikeSharp` runtime methods (or mirror this flow in `src/Cs2.Plugin.Metamod`).
 2. On connection attempt:
 - extract player token.
+- send `X-Server-Api-Key`.
 - call `/v1/attestation/validate-join`.
 - reject on any `allow=false`.
 3. During match:
 - push tick/shot/LoS telemetry in batches.
+- send `X-Server-Api-Key` on telemetry and health/action requests.
 - poll `/v1/attestation/match-health`.
 - consume `/v1/enforcement/actions/{matchSessionId}/pending` and ack via `/v1/enforcement/actions/ack`.
 

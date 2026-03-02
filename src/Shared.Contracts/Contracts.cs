@@ -170,6 +170,84 @@ public sealed record EnforcementActionAckResponse(
     string Reason,
     DateTimeOffset ReceivedAtUtc);
 
+public sealed record EvidencePackSummary(
+    string EvidenceId,
+    string MatchSessionId,
+    string AccountId,
+    string TriggerType,
+    string? ActionId,
+    string StoragePath,
+    string ContentSha256,
+    DateTimeOffset CreatedAtUtc,
+    string ReviewStatus);
+
+public sealed record CreateReviewCaseRequest(
+    string EvidenceId,
+    string MatchSessionId,
+    string AccountId,
+    string ReasonCode,
+    string Priority,
+    string RequestedBy);
+
+public sealed record ReviewCaseSummary(
+    string CaseId,
+    string EvidenceId,
+    string MatchSessionId,
+    string AccountId,
+    string ReasonCode,
+    string Priority,
+    string Status,
+    string? AssignedReviewer,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);
+
+public sealed record UpdateReviewCaseRequest(
+    string CaseId,
+    string Status,
+    string ReviewerId,
+    string Notes);
+
+public sealed record BanRecord(
+    string BanId,
+    string AccountId,
+    string Scope,
+    string Status,
+    DateTimeOffset StartAtUtc,
+    DateTimeOffset? EndAtUtc,
+    string Reason,
+    string? EvidenceId,
+    DateTimeOffset CreatedAtUtc);
+
+public sealed record CreateBanRequest(
+    string AccountId,
+    string Scope,
+    DateTimeOffset StartAtUtc,
+    DateTimeOffset? EndAtUtc,
+    string Reason,
+    string? EvidenceId,
+    string CreatedBy);
+
+public sealed record AppealRecord(
+    string AppealId,
+    string BanId,
+    string AccountId,
+    string Status,
+    DateTimeOffset SubmittedAtUtc,
+    DateTimeOffset? DecisionAtUtc,
+    string? ReviewerId,
+    string? DecisionNotes);
+
+public sealed record CreateAppealRequest(
+    string BanId,
+    string AccountId,
+    string Notes);
+
+public sealed record ResolveAppealRequest(
+    string AppealId,
+    string ReviewerId,
+    string Status,
+    string DecisionNotes);
+
 public sealed record QueueSessionState(
     string AccountId,
     string SteamId,

@@ -2,3 +2,4 @@
 **/obj/
 runtime/
 data/
+src/ControlPlane.Api/evidence/
