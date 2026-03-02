@@ -7,7 +7,7 @@ It enforces this flow:
 1. Player launches through your launcher.
 2. Client anti-cheat service attests health to backend.
 3. Backend issues a short-lived, single-use join token.
-4. Server-side bridge validates token and heartbeat status before allowing join.
+4. Server-side bridge validates token, heartbeat status, and active-ban state before allowing join.
 5. Server telemetry is ingested for rules and behavioral detections.
 6. Enforcement actions are exposed from backend (kick/cooldown/ban pipeline foundation).
 
@@ -130,6 +130,7 @@ High-level architecture:
 - token claims match request.
 - token exists and not used.
 - heartbeat exists and is fresh/healthy.
+- account has no active ban.
 4. If valid:
 - token marked used.
 - player allowed.
@@ -145,6 +146,9 @@ High-level architecture:
 3. Server queries `/v1/attestation/match-health`.
 4. If stale/unhealthy:
 - bridge/plugin can kick or move to spectator.
+5. If account becomes banned during match:
+- heartbeat and join validation surfaces `account_banned`.
+- bridge/plugin can enforce immediate kick.
 
 ## 6) Telemetry and Enforcement
 
@@ -236,7 +240,7 @@ Main capabilities:
 - Internal moderation CLI with `X-Internal-Api-Key` auth.
 - Evidence listing and lookup.
 - Review-case creation and status updates.
-- Ban creation and appeal lifecycle handling.
+- Ban creation/listing/status updates and appeal lifecycle handling.
 
 ## API Surface
 
@@ -287,7 +291,9 @@ Evidence/Moderation APIs:
 - `GET /v1/review/cases?status=...`
 - `POST /v1/review/cases/update`
 - `POST /v1/moderation/bans`
+- `GET /v1/moderation/bans?accountId=...&status=...`
 - `GET /v1/moderation/bans/{banId}`
+- `POST /v1/moderation/bans/status`
 - `POST /v1/moderation/appeals`
 - `GET /v1/moderation/appeals?status=...`
 - `POST /v1/moderation/appeals/resolve`
@@ -354,6 +360,7 @@ Tables created automatically by `SqliteStore.InitializeAsync`:
 - `review_cases`
 - `review_case_events`
 - `bans`
+- `ban_events`
 - `appeals`
 
 Data captured:
@@ -367,6 +374,7 @@ Data captured:
 - enforcement action records.
 - evidence pack metadata and hashes.
 - review/moderation case history.
+- ban lifecycle history (creation/revoke/status changes).
 
 ## Configuration
 
@@ -486,6 +494,7 @@ Reviewer workflow examples:
 ```powershell
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-bans --account $session.accountId --status active
 ```
 
 ## Runbook
@@ -565,6 +574,11 @@ For real AC integration:
 
 - Heartbeats are missing or delayed beyond grace window.
 
+`Join denied: account_banned`:
+
+- Active ban exists for account.
+- Query `/v1/moderation/bans?accountId=...&status=active` with internal auth.
+
 No telemetry actions generated:
 
 - Verify telemetry endpoints are receiving sufficient sample volume.
@@ -612,6 +626,8 @@ Current scope:
 - End-to-end handshake and gate.
 - Heartbeat health model.
 - Telemetry ingest and baseline detector outputs.
+- Ban-aware queue/join/heartbeat gating.
+- Evidence, review, ban, and appeal workflow APIs.
 - SQLite-backed persistence.
 - Local run scripts.
 
@@ -619,10 +635,10 @@ Next production steps:
 
 1. Replace simulated server bridge with CS2 plugin integration.
 2. Add proper identity/auth and account session hardening.
-3. Add evidence pack pipeline and review console.
-4. Add distributed infra (message bus, metrics, tracing, horizontal scaling).
-5. Add policy rollout controls and staged detector tuning.
-6. Add kernel-mode component and boot-chain attestation path if required by trust tier.
+3. Add distributed infra (message bus, metrics, tracing, horizontal scaling).
+4. Add policy rollout controls and staged detector tuning.
+5. Add kernel-mode component and boot-chain attestation path if required by trust tier.
+6. Add moderation UI and SLA-driven appeal operations.
 
 
 

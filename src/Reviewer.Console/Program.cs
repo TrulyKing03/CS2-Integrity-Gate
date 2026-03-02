@@ -77,6 +77,48 @@ switch (options.Command)
         await EnsureAndPrintAsync(response, json);
         break;
     }
+    case "list-bans":
+    {
+        var route = "v1/moderation/bans";
+        route = Append(route, "accountId", options.AccountId);
+        route = Append(route, "status", options.Status);
+        var items = await http.GetFromJsonAsync<List<BanRecord>>(route, json)
+            ?? new List<BanRecord>();
+        Print(items, json);
+        break;
+    }
+    case "get-ban":
+    {
+        var ban = await http.GetFromJsonAsync<BanRecord>(
+            $"v1/moderation/bans/{Uri.EscapeDataString(options.Require("--ban", options.BanId))}",
+            json);
+        if (ban is null)
+        {
+            throw new InvalidOperationException("Ban not found.");
+        }
+
+        Print(ban, json);
+        break;
+    }
+    case "update-ban":
+    {
+        var status = options.Status ?? "revoked";
+        DateTimeOffset? endAt = null;
+        if (status is "revoked" or "expired")
+        {
+            endAt = DateTimeOffset.UtcNow;
+        }
+
+        var request = new UpdateBanStatusRequest(
+            BanId: options.Require("--ban", options.BanId),
+            Status: status,
+            EndAtUtc: endAt,
+            UpdatedBy: options.RequestedBy ?? "reviewer_console",
+            Notes: options.Notes ?? "ban status updated");
+        var response = await http.PostAsJsonAsync("v1/moderation/bans/status", request, json);
+        await EnsureAndPrintAsync(response, json);
+        break;
+    }
     case "create-appeal":
     {
         var request = new CreateAppealRequest(
@@ -158,6 +200,9 @@ static void PrintUsage()
       list-cases [--status <status>]
       update-case --case <id> [--status <status>] [--reviewer <id>] [--notes <text>]
       create-ban --account <id> [--scope queue|global] [--reason <code>] [--evidence <id>] [--duration-hours <n>] [--by <actor>]
+      list-bans [--account <id>] [--status active|revoked|expired]
+      get-ban --ban <id>
+      update-ban --ban <id> --status active|revoked|expired [--notes <text>] [--by <actor>]
       create-appeal --ban <id> --account <id> [--notes <text>]
       list-appeals [--status <status>]
       resolve-appeal --appeal <id> [--status upheld|overturned|reduced] [--reviewer <id>] [--notes <text>]

@@ -227,6 +227,13 @@ public sealed record CreateBanRequest(
     string? EvidenceId,
     string CreatedBy);
 
+public sealed record UpdateBanStatusRequest(
+    string BanId,
+    string Status,
+    DateTimeOffset? EndAtUtc,
+    string UpdatedBy,
+    string Notes);
+
 public sealed record AppealRecord(
     string AppealId,
     string BanId,

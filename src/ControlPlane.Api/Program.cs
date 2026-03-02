@@ -83,6 +83,19 @@ app.MapPost("/v1/queue/enqueue", async (
     }
 
     await store.EnsureAccountAsync(request.AccountId, request.SteamId, cancellationToken);
+    var activeBan = await store.GetActiveBanForAccountAsync(request.AccountId, cancellationToken);
+    if (activeBan is not null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "account_banned",
+            activeBan.BanId,
+            activeBan.Scope,
+            activeBan.Status,
+            activeBan.EndAtUtc
+        });
+    }
+
     var queueType = NormalizeQueueType(request.QueueType);
     var queueResponse = new QueueResponse(
         MatchSessionId(),
@@ -141,6 +154,19 @@ app.MapPost("/v1/attestation/match-start", async (
     if (!isMatchPlayer)
     {
         return Results.BadRequest(new { error = "not_in_match_session" });
+    }
+
+    var activeBan = await store.GetActiveBanForAccountAsync(request.AccountId, cancellationToken);
+    if (activeBan is not null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "account_banned",
+            activeBan.BanId,
+            activeBan.Scope,
+            activeBan.Status,
+            activeBan.EndAtUtc
+        });
     }
 
     if (!request.PlatformSignals.SecureBoot || !request.PlatformSignals.Tpm20)
@@ -218,6 +244,26 @@ app.MapPost("/v1/attestation/heartbeat", async (
         return Results.BadRequest(new { error = "unknown_match_player" });
     }
 
+    var activeBan = await store.GetActiveBanForAccountAsync(request.AccountId, cancellationToken);
+    if (activeBan is not null)
+    {
+        var bannedAt = DateTimeOffset.UtcNow;
+        await store.AddHeartbeatAsync(request, steamId, "banned", cancellationToken);
+        await store.UpsertPlayerHealthAsync(
+            request.MatchSessionId,
+            request.AccountId,
+            steamId,
+            "banned",
+            bannedAt,
+            "kick",
+            cancellationToken);
+
+        return Results.Ok(new HeartbeatResponse(
+            "banned",
+            policyOptions.Value.HeartbeatIntervalSec,
+            "kick"));
+    }
+
     var healthy =
         request.PlatformSignals.SecureBoot &&
         request.PlatformSignals.Tpm20 &&
@@ -259,6 +305,16 @@ app.MapPost("/v1/attestation/validate-join", async (
     if (authFailure is not null)
     {
         return authFailure;
+    }
+
+    var activeBan = await store.GetActiveBanForAccountAsync(request.AccountId, cancellationToken);
+    if (activeBan is not null)
+    {
+        return Results.Ok(new ValidateJoinResponse(
+            Allow: false,
+            Reason: "account_banned",
+            HeartbeatStatus: "unhealthy",
+            TrustTier: $"banned_{activeBan.Scope.ToLowerInvariant()}"));
     }
 
     if (!tokenService.TryValidate(request.JoinToken, out var payload, out var reason) || payload is null)
@@ -591,6 +647,24 @@ app.MapPost("/v1/moderation/bans", async (
     return Results.Ok(ban);
 });
 
+app.MapGet("/v1/moderation/bans", async (
+    string? accountId,
+    string? status,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var bans = await store.ListBansAsync(accountId, status, cancellationToken);
+    return Results.Ok(bans);
+});
+
 app.MapGet("/v1/moderation/bans/{banId}", async (
     string banId,
     HttpContext context,
@@ -608,6 +682,25 @@ app.MapGet("/v1/moderation/bans/{banId}", async (
     return ban is null
         ? Results.NotFound(new { error = "ban_not_found" })
         : Results.Ok(ban);
+});
+
+app.MapPost("/v1/moderation/bans/status", async (
+    UpdateBanStatusRequest request,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var updated = await store.UpdateBanStatusAsync(request, cancellationToken);
+    return updated is null
+        ? Results.NotFound(new { error = "ban_not_found" })
+        : Results.Ok(updated);
 });
 
 app.MapPost("/v1/moderation/appeals", async (

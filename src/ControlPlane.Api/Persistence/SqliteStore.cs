@@ -66,6 +66,9 @@ public interface ISqliteStore
     Task<ReviewCaseSummary?> UpdateReviewCaseAsync(UpdateReviewCaseRequest request, CancellationToken cancellationToken);
     Task<BanRecord> CreateBanAsync(CreateBanRequest request, CancellationToken cancellationToken);
     Task<BanRecord?> GetBanAsync(string banId, CancellationToken cancellationToken);
+    Task<BanRecord?> GetActiveBanForAccountAsync(string accountId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<BanRecord>> ListBansAsync(string? accountId, string? status, CancellationToken cancellationToken);
+    Task<BanRecord?> UpdateBanStatusAsync(UpdateBanStatusRequest request, CancellationToken cancellationToken);
     Task<AppealRecord> CreateAppealAsync(CreateAppealRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<AppealRecord>> ListAppealsAsync(string? status, CancellationToken cancellationToken);
     Task<AppealRecord?> ResolveAppealAsync(ResolveAppealRequest request, CancellationToken cancellationToken);
@@ -287,6 +290,18 @@ public sealed class SqliteStore : ISqliteStore
                 reason TEXT NOT NULL,
                 evidence_id TEXT NULL,
                 created_by TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_bans_account_status
+                ON bans (account_id, status, start_at_utc, end_at_utc);
+
+            CREATE TABLE IF NOT EXISTS ban_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ban_id TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                notes TEXT NOT NULL,
                 created_at_utc TEXT NOT NULL
             );
 
@@ -1245,6 +1260,7 @@ public sealed class SqliteStore : ISqliteStore
 
     public async Task<BanRecord> CreateBanAsync(CreateBanRequest request, CancellationToken cancellationToken)
     {
+        var now = DateTimeOffset.UtcNow;
         var ban = new BanRecord(
             $"ban_{Guid.NewGuid():N}",
             request.AccountId,
@@ -1254,30 +1270,51 @@ public sealed class SqliteStore : ISqliteStore
             request.EndAtUtc,
             request.Reason,
             request.EvidenceId,
-            DateTimeOffset.UtcNow);
+            now);
 
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO bans (
-                ban_id, account_id, scope, status, start_at_utc, end_at_utc, reason, evidence_id, created_by, created_at_utc
-            )
-            VALUES (
-                $ban_id, $account_id, $scope, $status, $start_at_utc, $end_at_utc, $reason, $evidence_id, $created_by, $created_at_utc
-            );
-            """;
-        cmd.Parameters.AddWithValue("$ban_id", ban.BanId);
-        cmd.Parameters.AddWithValue("$account_id", ban.AccountId);
-        cmd.Parameters.AddWithValue("$scope", ban.Scope);
-        cmd.Parameters.AddWithValue("$status", ban.Status);
-        cmd.Parameters.AddWithValue("$start_at_utc", ban.StartAtUtc.ToString("O"));
-        cmd.Parameters.AddWithValue("$end_at_utc", (object?)ban.EndAtUtc?.ToString("O") ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$reason", ban.Reason);
-        cmd.Parameters.AddWithValue("$evidence_id", (object?)ban.EvidenceId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$created_by", request.CreatedBy);
-        cmd.Parameters.AddWithValue("$created_at_utc", ban.CreatedAtUtc.ToString("O"));
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                INSERT INTO bans (
+                    ban_id, account_id, scope, status, start_at_utc, end_at_utc, reason, evidence_id, created_by, created_at_utc
+                )
+                VALUES (
+                    $ban_id, $account_id, $scope, $status, $start_at_utc, $end_at_utc, $reason, $evidence_id, $created_by, $created_at_utc
+                );
+                """;
+            cmd.Parameters.AddWithValue("$ban_id", ban.BanId);
+            cmd.Parameters.AddWithValue("$account_id", ban.AccountId);
+            cmd.Parameters.AddWithValue("$scope", ban.Scope);
+            cmd.Parameters.AddWithValue("$status", ban.Status);
+            cmd.Parameters.AddWithValue("$start_at_utc", ban.StartAtUtc.ToString("O"));
+            cmd.Parameters.AddWithValue("$end_at_utc", (object?)ban.EndAtUtc?.ToString("O") ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$reason", ban.Reason);
+            cmd.Parameters.AddWithValue("$evidence_id", (object?)ban.EvidenceId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$created_by", request.CreatedBy);
+            cmd.Parameters.AddWithValue("$created_at_utc", ban.CreatedAtUtc.ToString("O"));
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                INSERT INTO ban_events (ban_id, actor_id, action_type, notes, created_at_utc)
+                VALUES ($ban_id, $actor_id, $action_type, $notes, $created_at_utc);
+                """;
+            cmd.Parameters.AddWithValue("$ban_id", ban.BanId);
+            cmd.Parameters.AddWithValue("$actor_id", request.CreatedBy);
+            cmd.Parameters.AddWithValue("$action_type", "ban_created");
+            cmd.Parameters.AddWithValue("$notes", $"scope={ban.Scope}; reason={ban.Reason}");
+            cmd.Parameters.AddWithValue("$created_at_utc", now.ToString("O"));
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await tx.CommitAsync(cancellationToken);
         return ban;
     }
 
@@ -1299,16 +1336,125 @@ public sealed class SqliteStore : ISqliteStore
             return null;
         }
 
-        return new BanRecord(
-            reader.GetString(0),
-            reader.GetString(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            DateTimeOffset.Parse(reader.GetString(4)),
-            reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5)),
-            reader.GetString(6),
-            reader.IsDBNull(7) ? null : reader.GetString(7),
-            DateTimeOffset.Parse(reader.GetString(8)));
+        return ReadBanRecord(reader);
+    }
+
+    public async Task<BanRecord?> GetActiveBanForAccountAsync(string accountId, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT ban_id, account_id, scope, status, start_at_utc, end_at_utc, reason, evidence_id, created_at_utc
+            FROM bans
+            WHERE account_id = $account_id
+              AND status = 'active'
+              AND start_at_utc <= $now_utc
+              AND (end_at_utc IS NULL OR end_at_utc > $now_utc)
+            ORDER BY created_at_utc DESC
+            LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("$account_id", accountId);
+        cmd.Parameters.AddWithValue("$now_utc", now.ToString("O"));
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return ReadBanRecord(reader);
+    }
+
+    public async Task<IReadOnlyList<BanRecord>> ListBansAsync(string? accountId, string? status, CancellationToken cancellationToken)
+    {
+        var result = new List<BanRecord>();
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+
+        var query = """
+            SELECT ban_id, account_id, scope, status, start_at_utc, end_at_utc, reason, evidence_id, created_at_utc
+            FROM bans
+            WHERE 1 = 1
+            """;
+        if (!string.IsNullOrWhiteSpace(accountId))
+        {
+            query += """
+            
+              AND account_id = $account_id
+            """;
+            cmd.Parameters.AddWithValue("$account_id", accountId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query += """
+            
+              AND status = $status
+            """;
+            cmd.Parameters.AddWithValue("$status", status);
+        }
+
+        query += """
+            
+            ORDER BY created_at_utc DESC
+            LIMIT 500;
+            """;
+        cmd.CommandText = query;
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(ReadBanRecord(reader));
+        }
+
+        return result;
+    }
+
+    public async Task<BanRecord?> UpdateBanStatusAsync(UpdateBanStatusRequest request, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                UPDATE bans
+                SET status = $status,
+                    end_at_utc = $end_at_utc
+                WHERE ban_id = $ban_id;
+                """;
+            cmd.Parameters.AddWithValue("$status", request.Status);
+            cmd.Parameters.AddWithValue("$end_at_utc", (object?)request.EndAtUtc?.ToString("O") ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ban_id", request.BanId);
+            var updated = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            if (updated == 0)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                return null;
+            }
+        }
+
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                INSERT INTO ban_events (ban_id, actor_id, action_type, notes, created_at_utc)
+                VALUES ($ban_id, $actor_id, $action_type, $notes, $created_at_utc);
+                """;
+            cmd.Parameters.AddWithValue("$ban_id", request.BanId);
+            cmd.Parameters.AddWithValue("$actor_id", request.UpdatedBy);
+            cmd.Parameters.AddWithValue("$action_type", $"ban_{request.Status}");
+            cmd.Parameters.AddWithValue("$notes", request.Notes);
+            cmd.Parameters.AddWithValue("$created_at_utc", now.ToString("O"));
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await tx.CommitAsync(cancellationToken);
+        return await GetBanAsync(request.BanId, cancellationToken);
     }
 
     public async Task<AppealRecord> CreateAppealAsync(CreateAppealRequest request, CancellationToken cancellationToken)
@@ -1393,49 +1539,95 @@ public sealed class SqliteStore : ISqliteStore
         var now = DateTimeOffset.UtcNow;
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
-            UPDATE appeals
-            SET status = $status,
-                decision_at_utc = $decision_at_utc,
-                reviewer_id = $reviewer_id,
-                decision_notes = $decision_notes
-            WHERE appeal_id = $appeal_id;
-            """;
-        cmd.Parameters.AddWithValue("$status", request.Status);
-        cmd.Parameters.AddWithValue("$decision_at_utc", now.ToString("O"));
-        cmd.Parameters.AddWithValue("$reviewer_id", request.ReviewerId);
-        cmd.Parameters.AddWithValue("$decision_notes", request.DecisionNotes);
-        cmd.Parameters.AddWithValue("$appeal_id", request.AppealId);
-        var updated = await cmd.ExecuteNonQueryAsync(cancellationToken);
-        if (updated == 0)
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using (var cmd = connection.CreateCommand())
         {
-            return null;
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                UPDATE appeals
+                SET status = $status,
+                    decision_at_utc = $decision_at_utc,
+                    reviewer_id = $reviewer_id,
+                    decision_notes = $decision_notes
+                WHERE appeal_id = $appeal_id;
+                """;
+            cmd.Parameters.AddWithValue("$status", request.Status);
+            cmd.Parameters.AddWithValue("$decision_at_utc", now.ToString("O"));
+            cmd.Parameters.AddWithValue("$reviewer_id", request.ReviewerId);
+            cmd.Parameters.AddWithValue("$decision_notes", request.DecisionNotes);
+            cmd.Parameters.AddWithValue("$appeal_id", request.AppealId);
+            var updated = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            if (updated == 0)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                return null;
+            }
         }
 
-        await using var readCmd = connection.CreateCommand();
-        readCmd.CommandText = """
-            SELECT appeal_id, ban_id, account_id, status, submitted_at_utc, decision_at_utc, reviewer_id, decision_notes
-            FROM appeals
-            WHERE appeal_id = $appeal_id
-            LIMIT 1;
-            """;
-        readCmd.Parameters.AddWithValue("$appeal_id", request.AppealId);
-        await using var reader = await readCmd.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
+        AppealRecord? appeal;
+        await using (var readCmd = connection.CreateCommand())
         {
-            return null;
+            readCmd.Transaction = tx;
+            readCmd.CommandText = """
+                SELECT appeal_id, ban_id, account_id, status, submitted_at_utc, decision_at_utc, reviewer_id, decision_notes
+                FROM appeals
+                WHERE appeal_id = $appeal_id
+                LIMIT 1;
+                """;
+            readCmd.Parameters.AddWithValue("$appeal_id", request.AppealId);
+            await using var reader = await readCmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                await tx.RollbackAsync(cancellationToken);
+                return null;
+            }
+
+            appeal = new AppealRecord(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                DateTimeOffset.Parse(reader.GetString(4)),
+                reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5)),
+                reader.IsDBNull(6) ? null : reader.GetString(6),
+                reader.IsDBNull(7) ? null : reader.GetString(7));
         }
 
-        return new AppealRecord(
-            reader.GetString(0),
-            reader.GetString(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            DateTimeOffset.Parse(reader.GetString(4)),
-            reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5)),
-            reader.IsDBNull(6) ? null : reader.GetString(6),
-            reader.IsDBNull(7) ? null : reader.GetString(7));
+        if (string.Equals(request.Status, "overturned", StringComparison.OrdinalIgnoreCase))
+        {
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    UPDATE bans
+                    SET status = 'revoked',
+                        end_at_utc = $end_at_utc
+                    WHERE ban_id = $ban_id
+                      AND status = 'active';
+                    """;
+                cmd.Parameters.AddWithValue("$end_at_utc", now.ToString("O"));
+                cmd.Parameters.AddWithValue("$ban_id", appeal.BanId);
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    INSERT INTO ban_events (ban_id, actor_id, action_type, notes, created_at_utc)
+                    VALUES ($ban_id, $actor_id, $action_type, $notes, $created_at_utc);
+                    """;
+                cmd.Parameters.AddWithValue("$ban_id", appeal.BanId);
+                cmd.Parameters.AddWithValue("$actor_id", request.ReviewerId);
+                cmd.Parameters.AddWithValue("$action_type", "ban_revoked_via_appeal");
+                cmd.Parameters.AddWithValue("$notes", request.DecisionNotes);
+                cmd.Parameters.AddWithValue("$created_at_utc", now.ToString("O"));
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+
+        await tx.CommitAsync(cancellationToken);
+        return appeal;
     }
 
     private static EvidencePackSummary ReadEvidenceSummary(SqliteDataReader reader)
@@ -1465,6 +1657,20 @@ public sealed class SqliteStore : ISqliteStore
             reader.IsDBNull(7) ? null : reader.GetString(7),
             DateTimeOffset.Parse(reader.GetString(8)),
             DateTimeOffset.Parse(reader.GetString(9)));
+    }
+
+    private static BanRecord ReadBanRecord(SqliteDataReader reader)
+    {
+        return new BanRecord(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            DateTimeOffset.Parse(reader.GetString(4)),
+            reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5)),
+            reader.GetString(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            DateTimeOffset.Parse(reader.GetString(8)));
     }
 
     private static async Task<ReviewCaseSummary?> GetReviewCaseByIdInternalAsync(
