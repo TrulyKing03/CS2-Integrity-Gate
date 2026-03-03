@@ -1,4 +1,7 @@
 param(
+    [ValidateSet("play", "doctor", "status", "clear-runtime")]
+    [string]$Command = "play",
+    [string]$Profile = "",
     [string]$Backend = "http://localhost:5042",
     [string]$Account = "acc_local_demo",
     [string]$Steam = "76561190000000001",
@@ -10,14 +13,23 @@ $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
 $args = @(
-    "--backend", $Backend,
-    "--account", $Account,
-    "--steam", $Steam,
-    "--keep-runtime"
+    $Command
 )
 
-if ($SelfValidate) {
-    $args += "--self-validate"
+if (-not [string]::IsNullOrWhiteSpace($Profile)) {
+    $args += @("--profile", $Profile)
+}
+else {
+    $args += @(
+        "--backend", $Backend,
+        "--account", $Account,
+        "--steam", $Steam,
+        "--keep-runtime"
+    )
+
+    if ($SelfValidate) {
+        $args += "--self-validate"
+    }
 }
 
 dotnet run --project src/Launcher.App -- @args

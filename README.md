@@ -566,6 +566,13 @@ dotnet run --project src/Launcher.App -- status --runtime runtime
 dotnet run --project src/Launcher.App -- play --profile src/Launcher.App/launcher.profile.sample.json
 ```
 
+Launcher helper script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run-launcher.ps1 -Command doctor
+powershell -ExecutionPolicy Bypass -File scripts/run-launcher.ps1 -Command play -Profile src/Launcher.App/launcher.profile.sample.json
+```
+
 ## Runbook
 
 ## Daily local verification
