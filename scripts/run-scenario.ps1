@@ -42,12 +42,16 @@ switch ($Scenario.ToLowerInvariant()) {
         powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1 -Backend $backend -BridgeApiKey $bridgeApiKey
         break
     }
+    "queue-auth" {
+        powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1 -Backend $backend
+        break
+    }
     "qa-full" {
         powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Backend $backend
         break
     }
     default {
-        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|gateway|qa-fast|qa-full)"
+        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|gateway|queue-auth|qa-fast|qa-full)"
     }
 }
 

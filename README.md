@@ -548,6 +548,7 @@ Scenario runner (single entrypoint for scripted flows):
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario smoke -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario gateway -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario queue-auth -SettingsPath ops/stack.settings.sample.json
 ```
 
 Local stack manager:
@@ -638,6 +639,7 @@ Plugin gateway helper script:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1
 ```
 
 ## Runbook
@@ -651,6 +653,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
 5. Confirm action feed returns expected actions for synthetic cheat mode.
 6. Run `scripts/qa-run.ps1 -Fast` before merge.
 7. Run `scripts/smoke-plugin-gateway.ps1` before plugin host integration changes.
+8. Run `scripts/smoke-queue-auth.ps1` when changing auth/queue flow.
 
 ## Reset local state
 
@@ -804,6 +807,7 @@ No telemetry actions generated:
 |   |-- run-threshold-tuner.ps1
 |   |-- smoke-test.ps1
 |   |-- smoke-plugin-gateway.ps1
+|   |-- smoke-queue-auth.ps1
 |   |-- smoke-ban-lifecycle.ps1
 |   `-- reviewer-demo.ps1
 |-- tools

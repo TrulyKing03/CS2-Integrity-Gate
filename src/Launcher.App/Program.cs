@@ -369,12 +369,13 @@ static async Task<ResolvedIdentity> ResolveIdentityAsync(
         options.Password ?? "local_password");
     var loginResponse = await http.PostAsJsonAsync("v1/auth/login", loginRequest, jsonOptions);
     var login = await ReadSuccessOrThrowAsync<LoginResponse>(loginResponse, jsonOptions, "login");
+    var effectiveAccessToken = string.IsNullOrWhiteSpace(options.AccessToken) ? login.AccessToken : options.AccessToken;
     if (!string.IsNullOrWhiteSpace(options.SteamId))
     {
-        return new ResolvedIdentity(login.AccountId, options.SteamId, options.AccessToken ?? login.AccessToken);
+        return new ResolvedIdentity(login.AccountId, options.SteamId, effectiveAccessToken);
     }
 
-    return new ResolvedIdentity(login.AccountId, login.SteamId, options.AccessToken ?? login.AccessToken);
+    return new ResolvedIdentity(login.AccountId, login.SteamId, effectiveAccessToken);
 }
 
 static Task<HttpResponseMessage> SendQueueRequestAsync(
