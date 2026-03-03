@@ -106,6 +106,8 @@ switch (options.Command)
     {
         var route = "v1/review/cases";
         route = Append(route, "status", options.Status);
+        route = Append(route, "matchSessionId", options.MatchSessionId);
+        route = Append(route, "accountId", options.AccountId);
         var items = await http.GetFromJsonAsync<List<ReviewCaseSummary>>(route, json)
             ?? new List<ReviewCaseSummary>();
         Print(items, json);
@@ -271,7 +273,7 @@ static void PrintUsage()
       run-security-alert-eval [--force]
       list-evidence [--match <id>] [--account <id>]
       create-case --evidence <id> --match <id> --account <id> [--reason <code>] [--priority <level>] [--by <actor>]
-      list-cases [--status <status>]
+      list-cases [--status <status>] [--match <id>] [--account <id>]
       update-case --case <id> [--status <status>] [--reviewer <id>] [--notes <text>]
       create-ban --account <id> [--scope queue|global] [--reason <code>] [--evidence <id>] [--duration-hours <n>] [--by <actor>]
       list-bans [--account <id>] [--status active|revoked|expired]

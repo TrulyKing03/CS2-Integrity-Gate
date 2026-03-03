@@ -1012,6 +1012,7 @@ app.MapPost("/v1/telemetry/ticks", async (
     ISqliteStore store,
     IDetectionEngine detectionEngine,
     IEvidenceService evidenceService,
+    IOptions<EvidenceOptions> evidenceOptions,
     IOptions<AcPolicyOptions> policyOptions,
     IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
@@ -1036,6 +1037,7 @@ app.MapPost("/v1/telemetry/ticks", async (
         result,
         envelope.MatchSessionId,
         actionDedupSec,
+        evidenceOptions.Value,
         store,
         evidenceService,
         cancellationToken);
@@ -1048,6 +1050,7 @@ app.MapPost("/v1/telemetry/shots", async (
     ISqliteStore store,
     IDetectionEngine detectionEngine,
     IEvidenceService evidenceService,
+    IOptions<EvidenceOptions> evidenceOptions,
     IOptions<AcPolicyOptions> policyOptions,
     IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
@@ -1072,6 +1075,7 @@ app.MapPost("/v1/telemetry/shots", async (
         result,
         envelope.MatchSessionId,
         actionDedupSec,
+        evidenceOptions.Value,
         store,
         evidenceService,
         cancellationToken);
@@ -1084,6 +1088,7 @@ app.MapPost("/v1/telemetry/los", async (
     ISqliteStore store,
     IDetectionEngine detectionEngine,
     IEvidenceService evidenceService,
+    IOptions<EvidenceOptions> evidenceOptions,
     IOptions<AcPolicyOptions> policyOptions,
     IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
@@ -1108,6 +1113,7 @@ app.MapPost("/v1/telemetry/los", async (
         result,
         envelope.MatchSessionId,
         actionDedupSec,
+        evidenceOptions.Value,
         store,
         evidenceService,
         cancellationToken);
@@ -1235,6 +1241,8 @@ app.MapPost("/v1/review/cases", async (
 
 app.MapGet("/v1/review/cases", async (
     string? status,
+    string? matchSessionId,
+    string? accountId,
     HttpContext context,
     ISqliteStore store,
     IOptions<ApiAuthOptions> apiAuthOptions,
@@ -1246,7 +1254,7 @@ app.MapGet("/v1/review/cases", async (
         return authFailure;
     }
 
-    var cases = await store.ListReviewCasesAsync(status, cancellationToken);
+    var cases = await store.ListReviewCasesAsync(status, matchSessionId, accountId, cancellationToken);
     return Results.Ok(cases);
 });
 
@@ -1401,6 +1409,7 @@ static async Task PersistDetectionResultAsync(
     DetectionResult result,
     string matchSessionId,
     int actionDedupSec,
+    EvidenceOptions evidenceOptions,
     ISqliteStore store,
     IEvidenceService evidenceService,
     CancellationToken cancellationToken)
@@ -1435,13 +1444,64 @@ static async Task PersistDetectionResultAsync(
             """,
             cancellationToken);
 
-        await evidenceService.BuildAndStoreEvidenceAsync(
+        var evidence = await evidenceService.BuildAndStoreEvidenceAsync(
             matchSessionId,
             action.AccountId,
             triggerType: action.ReasonCode,
             actionId: action.ActionId,
             cancellationToken);
+
+        if (!ShouldAutoCreateReviewCase(evidenceOptions, action.ReasonCode))
+        {
+            continue;
+        }
+
+        var request = new CreateReviewCaseRequest(
+            EvidenceId: evidence.EvidenceId,
+            MatchSessionId: evidence.MatchSessionId,
+            AccountId: evidence.AccountId,
+            ReasonCode: action.ReasonCode,
+            Priority: string.IsNullOrWhiteSpace(evidenceOptions.AutoReviewPriority) ? "high" : evidenceOptions.AutoReviewPriority.Trim(),
+            RequestedBy: string.IsNullOrWhiteSpace(evidenceOptions.AutoReviewRequestedBy) ? "auto_detection" : evidenceOptions.AutoReviewRequestedBy.Trim());
+
+        try
+        {
+            await store.CreateReviewCaseAsync(request, cancellationToken);
+        }
+        catch
+        {
+            // Auto-review seeding should not block telemetry ingestion.
+        }
     }
+}
+
+static bool ShouldAutoCreateReviewCase(EvidenceOptions options, string reasonCode)
+{
+    if (!options.AutoCreateReviewCases || string.IsNullOrWhiteSpace(reasonCode))
+    {
+        return false;
+    }
+
+    var allowList = options.AutoReviewTriggerAllowList;
+    if (allowList is null || allowList.Count == 0)
+    {
+        return true;
+    }
+
+    foreach (var item in allowList)
+    {
+        if (string.IsNullOrWhiteSpace(item))
+        {
+            continue;
+        }
+
+        if (string.Equals(item.Trim(), reasonCode.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static string CreateAccountId(string username)

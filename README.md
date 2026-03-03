@@ -349,6 +349,7 @@ Evidence/Moderation APIs:
 - `GET /v1/evidence/{evidenceId}`
 - `POST /v1/review/cases`
 - `GET /v1/review/cases?status=...`
+- `GET /v1/review/cases?status=...&matchSessionId=...&accountId=...`
 - `POST /v1/review/cases/update`
 - `POST /v1/moderation/bans`
 - `GET /v1/moderation/bans?accountId=...&status=...`
@@ -479,6 +480,10 @@ Key sections:
 - `Evidence.StorageDirectory`
 - `Evidence.RecentTelemetryLimit`
 - `Evidence.RecentHeartbeatsLimit`
+- `Evidence.AutoCreateReviewCases`
+- `Evidence.AutoReviewPriority`
+- `Evidence.AutoReviewRequestedBy`
+- `Evidence.AutoReviewTriggerAllowList`
 - `DataRetention.Enabled`
 - `DataRetention.RunOnStartup`
 - `DataRetention.SweepIntervalMinutes`
@@ -584,6 +589,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario secu
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-alerts -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-alerts-manual -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario session-revoke -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario auto-review -SettingsPath ops/stack.settings.sample.json
 ```
 
 Local stack manager:
@@ -659,7 +665,7 @@ dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --i
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-security-alert-eval
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-security-alert-eval --force
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
-dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-bans --account $session.accountId --status active
 ```
 
@@ -686,6 +692,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-session-revoke.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-auto-review-case.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-policy-hash.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-security-events.ps1
@@ -713,6 +720,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-security-alert-manual.ps1
 12. Run `scripts/smoke-security-events.ps1` when changing auth/rate-limit/ops auditing paths.
 13. Run `scripts/smoke-security-alert-status.ps1` when changing security alert thresholds or worker behavior.
 14. Run `scripts/smoke-security-alert-manual.ps1` when changing manual alert evaluation flows.
+15. Run `scripts/smoke-auto-review-case.ps1` when changing evidence-to-review automation.
 
 ## Reset local state
 
@@ -874,6 +882,7 @@ No telemetry actions generated:
 |   |-- smoke-plugin-gateway.ps1
 |   |-- smoke-queue-auth.ps1
 |   |-- smoke-session-revoke.ps1
+|   |-- smoke-auto-review-case.ps1
 |   |-- smoke-retention-status.ps1
 |   |-- smoke-policy-hash.ps1
 |   |-- smoke-security-events.ps1
@@ -910,6 +919,7 @@ Current scope:
 - Security-event audit logging and ops query endpoints.
 - Security alert worker with threshold/cooldown status endpoint.
 - Access-token logout and internal account-session revocation workflow.
+- Automatic review-case seeding from configured high-confidence evidence triggers.
 - Evidence, review, ban, and appeal workflow APIs.
 - Offline threshold report generation for detector tuning.
 - SQLite-backed persistence.

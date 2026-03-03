@@ -6,6 +6,7 @@ param(
     [switch]$SkipPluginGatewaySmoke,
     [switch]$SkipQueueAuthSmoke,
     [switch]$SkipSessionRevokeSmoke,
+    [switch]$SkipAutoReviewSmoke,
     [switch]$SkipRetentionSmoke,
     [switch]$SkipPolicyHashSmoke,
     [switch]$SkipSecurityEventSmoke,
@@ -106,6 +107,10 @@ try {
 
     if (-not $Fast -and -not $SkipSessionRevokeSmoke) {
         Invoke-Step "smoke-session-revoke" { powershell -ExecutionPolicy Bypass -File scripts/smoke-session-revoke.ps1 -Backend $Backend }
+    }
+
+    if (-not $Fast -and -not $SkipAutoReviewSmoke) {
+        Invoke-Step "smoke-auto-review-case" { powershell -ExecutionPolicy Bypass -File scripts/smoke-auto-review-case.ps1 -Backend $Backend }
     }
 
     if (-not $Fast -and -not $SkipRetentionSmoke) {

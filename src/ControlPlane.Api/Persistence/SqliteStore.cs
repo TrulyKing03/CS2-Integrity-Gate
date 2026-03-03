@@ -88,7 +88,11 @@ public interface ISqliteStore
     Task<EvidencePackSummary?> GetEvidencePackSummaryAsync(string evidenceId, CancellationToken cancellationToken);
     Task<IReadOnlyList<EvidencePackSummary>> ListEvidencePackSummariesAsync(string? matchSessionId, string? accountId, CancellationToken cancellationToken);
     Task<ReviewCaseSummary> CreateReviewCaseAsync(CreateReviewCaseRequest request, CancellationToken cancellationToken);
-    Task<IReadOnlyList<ReviewCaseSummary>> ListReviewCasesAsync(string? status, CancellationToken cancellationToken);
+    Task<IReadOnlyList<ReviewCaseSummary>> ListReviewCasesAsync(
+        string? status,
+        string? matchSessionId,
+        string? accountId,
+        CancellationToken cancellationToken);
     Task<ReviewCaseSummary?> UpdateReviewCaseAsync(UpdateReviewCaseRequest request, CancellationToken cancellationToken);
     Task<BanRecord> CreateBanAsync(CreateBanRequest request, CancellationToken cancellationToken);
     Task<BanRecord?> GetBanAsync(string banId, CancellationToken cancellationToken);
@@ -1415,7 +1419,11 @@ public sealed class SqliteStore : ISqliteStore
             now);
     }
 
-    public async Task<IReadOnlyList<ReviewCaseSummary>> ListReviewCasesAsync(string? status, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ReviewCaseSummary>> ListReviewCasesAsync(
+        string? status,
+        string? matchSessionId,
+        string? accountId,
+        CancellationToken cancellationToken)
     {
         var result = new List<ReviewCaseSummary>();
         await using var connection = new SqliteConnection(_connectionString);
@@ -1433,6 +1441,24 @@ public sealed class SqliteStore : ISqliteStore
               AND status = $status
             """;
             cmd.Parameters.AddWithValue("$status", status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(matchSessionId))
+        {
+            query += """
+            
+              AND match_session_id = $match_session_id
+            """;
+            cmd.Parameters.AddWithValue("$match_session_id", matchSessionId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(accountId))
+        {
+            query += """
+            
+              AND account_id = $account_id
+            """;
+            cmd.Parameters.AddWithValue("$account_id", accountId);
         }
 
         query += """
