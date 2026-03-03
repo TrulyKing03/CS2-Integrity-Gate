@@ -327,8 +327,8 @@ Telemetry:
 Detection/Enforcement read APIs:
 
 - `GET /v1/detections/scores/{matchSessionId}/{accountId}`
-- `GET /v1/enforcement/actions/{matchSessionId}`
-- `GET /v1/enforcement/actions/{matchSessionId}/pending?accountId=...`
+- `GET /v1/enforcement/actions/{matchSessionId}?limit=...`
+- `GET /v1/enforcement/actions/{matchSessionId}/pending?accountId=...&limit=...`
 - `POST /v1/enforcement/actions/ack`
 
 Evidence/Moderation APIs:

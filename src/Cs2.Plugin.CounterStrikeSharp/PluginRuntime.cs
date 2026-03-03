@@ -126,7 +126,8 @@ public sealed class PluginRuntime : IDisposable
         string? accountId,
         CancellationToken cancellationToken)
     {
-        var actions = await _client.GetPendingActionsAsync(matchSessionId, accountId, cancellationToken);
+        var fetchLimit = Math.Max(1, _options.PendingActionFetchLimit);
+        var actions = await _client.GetPendingActionsAsync(matchSessionId, accountId, fetchLimit, cancellationToken);
         foreach (var action in actions)
         {
             var result = "applied";

@@ -10,4 +10,5 @@ public sealed class PluginRuntimeOptions
     public int TelemetryFlushSec { get; set; } = 3;
     public int HealthPollSec { get; set; } = 5;
     public int ActionPollSec { get; set; } = 3;
+    public int PendingActionFetchLimit { get; set; } = 200;
 }

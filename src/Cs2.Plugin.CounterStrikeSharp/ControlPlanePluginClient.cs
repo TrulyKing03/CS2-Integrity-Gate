@@ -89,12 +89,14 @@ public sealed class ControlPlanePluginClient : IDisposable
     public async Task<IReadOnlyList<EnforcementAction>> GetPendingActionsAsync(
         string matchSessionId,
         string? accountId,
+        int limit,
         CancellationToken cancellationToken)
     {
-        var route = $"v1/enforcement/actions/{Uri.EscapeDataString(matchSessionId)}/pending";
+        var normalizedLimit = Math.Clamp(limit, 1, 1000);
+        var route = $"v1/enforcement/actions/{Uri.EscapeDataString(matchSessionId)}/pending?limit={normalizedLimit}";
         if (!string.IsNullOrWhiteSpace(accountId))
         {
-            route += $"?accountId={Uri.EscapeDataString(accountId)}";
+            route += $"&accountId={Uri.EscapeDataString(accountId)}";
         }
 
         var result = await _http.GetFromJsonAsync<List<EnforcementAction>>(route, JsonOptions, cancellationToken);

@@ -18,7 +18,8 @@ builder.Services.AddSingleton(sp =>
         MaxBatchSize = options.MaxBatchSize,
         TelemetryFlushSec = options.TelemetryFlushSec,
         HealthPollSec = options.HealthPollSec,
-        ActionPollSec = options.ActionPollSec
+        ActionPollSec = options.ActionPollSec,
+        PendingActionFetchLimit = options.PendingActionFetchLimit
     };
 });
 builder.Services.AddSingleton<PluginRuntime>(sp =>
@@ -281,6 +282,7 @@ internal sealed class GatewayOptions
     public int TelemetryFlushSec { get; set; } = 3;
     public int HealthPollSec { get; set; } = 5;
     public int ActionPollSec { get; set; } = 3;
+    public int PendingActionFetchLimit { get; set; } = 200;
     public int HostActionTtlSec { get; set; } = 180;
 }
 

@@ -77,8 +77,8 @@ public interface ISqliteStore
         string reasonCode,
         int withinSeconds,
         CancellationToken cancellationToken);
-    Task<IReadOnlyList<EnforcementAction>> GetEnforcementActionsAsync(string matchSessionId, CancellationToken cancellationToken);
-    Task<IReadOnlyList<EnforcementAction>> GetPendingEnforcementActionsAsync(string matchSessionId, string? accountId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<EnforcementAction>> GetEnforcementActionsAsync(string matchSessionId, int limit, CancellationToken cancellationToken);
+    Task<IReadOnlyList<EnforcementAction>> GetPendingEnforcementActionsAsync(string matchSessionId, string? accountId, int limit, CancellationToken cancellationToken);
     Task<bool> AcknowledgeEnforcementActionAsync(EnforcementActionAckRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<TelemetryEventRecord>> GetRecentTelemetryEventsAsync(string matchSessionId, string accountId, int limit, CancellationToken cancellationToken);
     Task<IReadOnlyList<HeartbeatDbRecord>> GetRecentHeartbeatsAsync(string matchSessionId, string accountId, int limit, CancellationToken cancellationToken);
@@ -996,8 +996,10 @@ public sealed class SqliteStore : ISqliteStore
 
     public async Task<IReadOnlyList<EnforcementAction>> GetEnforcementActionsAsync(
         string matchSessionId,
+        int limit,
         CancellationToken cancellationToken)
     {
+        var normalizedLimit = Math.Clamp(limit, 1, 1000);
         var result = new List<EnforcementAction>();
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -1006,9 +1008,11 @@ public sealed class SqliteStore : ISqliteStore
             SELECT action_id, match_session_id, account_id, action_type, reason_code, duration_seconds, created_at_utc
             FROM enforcement_actions
             WHERE match_session_id = $match_session_id
-            ORDER BY created_at_utc DESC;
+            ORDER BY created_at_utc DESC
+            LIMIT $limit;
             """;
         cmd.Parameters.AddWithValue("$match_session_id", matchSessionId);
+        cmd.Parameters.AddWithValue("$limit", normalizedLimit);
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
@@ -1028,8 +1032,10 @@ public sealed class SqliteStore : ISqliteStore
     public async Task<IReadOnlyList<EnforcementAction>> GetPendingEnforcementActionsAsync(
         string matchSessionId,
         string? accountId,
+        int limit,
         CancellationToken cancellationToken)
     {
+        var normalizedLimit = Math.Clamp(limit, 1, 1000);
         var result = new List<EnforcementAction>();
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -1054,10 +1060,12 @@ public sealed class SqliteStore : ISqliteStore
 
         query += """
             
-            ORDER BY ea.created_at_utc DESC;
+            ORDER BY ea.created_at_utc DESC
+            LIMIT $limit;
             """;
         cmd.CommandText = query;
         cmd.Parameters.AddWithValue("$match_session_id", matchSessionId);
+        cmd.Parameters.AddWithValue("$limit", normalizedLimit);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))

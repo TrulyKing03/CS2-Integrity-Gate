@@ -694,6 +694,7 @@ app.MapGet("/v1/detections/scores/{matchSessionId}/{accountId}", async (
 
 app.MapGet("/v1/enforcement/actions/{matchSessionId}", async (
     string matchSessionId,
+    int? limit,
     HttpContext context,
     ISqliteStore store,
     IOptions<ApiAuthOptions> apiAuthOptions,
@@ -705,13 +706,14 @@ app.MapGet("/v1/enforcement/actions/{matchSessionId}", async (
         return authFailure;
     }
 
-    var actions = await store.GetEnforcementActionsAsync(matchSessionId, cancellationToken);
+    var actions = await store.GetEnforcementActionsAsync(matchSessionId, limit ?? 200, cancellationToken);
     return Results.Ok(actions);
 });
 
 app.MapGet("/v1/enforcement/actions/{matchSessionId}/pending", async (
     string matchSessionId,
     string? accountId,
+    int? limit,
     HttpContext context,
     ISqliteStore store,
     IOptions<ApiAuthOptions> apiAuthOptions,
@@ -723,7 +725,7 @@ app.MapGet("/v1/enforcement/actions/{matchSessionId}/pending", async (
         return authFailure;
     }
 
-    var actions = await store.GetPendingEnforcementActionsAsync(matchSessionId, accountId, cancellationToken);
+    var actions = await store.GetPendingEnforcementActionsAsync(matchSessionId, accountId, limit ?? 200, cancellationToken);
     return Results.Ok(actions);
 });
 
