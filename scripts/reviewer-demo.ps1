@@ -1,3 +1,7 @@
+param(
+    [string]$Backend = "http://localhost:5042"
+)
+
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
@@ -19,10 +23,10 @@ Remove-Item $sessionPath -ErrorAction SilentlyContinue
 Remove-Item $tokenPath -ErrorAction SilentlyContinue
 
 $apiJob = Start-Job -ScriptBlock {
-    param($r)
+    param($r, $u)
     Set-Location $r
-    dotnet run --project src/ControlPlane.Api --urls http://localhost:5042
-} -ArgumentList $repo
+    dotnet run --project src/ControlPlane.Api --urls $u
+} -ArgumentList $repo, $Backend
 
 $acJob = Start-Job -ScriptBlock {
     param($r)
@@ -34,7 +38,7 @@ try {
     Start-Sleep -Seconds 8
 
     Write-Host "[demo] launcher"
-    dotnet run --project src/Launcher.App -- --backend http://localhost:5042 --account $accountId --steam $steamId --keep-runtime
+    dotnet run --project src/Launcher.App -- --backend $Backend --account $accountId --steam $steamId --token-wait-sec 180 --keep-runtime
     if ($LASTEXITCODE -ne 0) {
         throw "Launcher failed with exit code $LASTEXITCODE"
     }
@@ -43,13 +47,13 @@ try {
     $token = Get-Content $tokenPath | ConvertFrom-Json
 
     Write-Host "[demo] server simulator via plugin runtime"
-    dotnet run --project tools/simulators/ServerBridge.Agent -- --backend http://localhost:5042 --server-api-key $serverKey --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken --simulate-cheat --runtime-sec 8
+    dotnet run --project tools/simulators/ServerBridge.Agent -- --backend $Backend --server-api-key $serverKey --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken --simulate-cheat --runtime-sec 8
     if ($LASTEXITCODE -ne 0) {
         throw "Server simulator failed with exit code $LASTEXITCODE"
     }
 
     Write-Host "[demo] list evidence"
-    $evidenceJson = dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey list-evidence --match $session.matchSessionId --account $session.accountId
+    $evidenceJson = dotnet run --project src/Reviewer.Console -- --backend $Backend --internal-api-key $internalKey list-evidence --match $session.matchSessionId --account $session.accountId
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewer.Console list-evidence failed with exit code $LASTEXITCODE"
     }
@@ -59,47 +63,47 @@ try {
     }
 
     Write-Host "[demo] system metrics"
-    dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey system-metrics
+    dotnet run --project src/Reviewer.Console -- --backend $Backend --internal-api-key $internalKey system-metrics
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewer.Console system-metrics failed with exit code $LASTEXITCODE"
     }
 
     $evidenceId = $evidence[0].evidenceId
     Write-Host "[demo] create case for evidence $evidenceId"
-    $caseJson = dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey create-case --evidence $evidenceId --match $session.matchSessionId --account $session.accountId --reason rules_impossible_state --priority high --by reviewer_demo
+    $caseJson = dotnet run --project src/Reviewer.Console -- --backend $Backend --internal-api-key $internalKey create-case --evidence $evidenceId --match $session.matchSessionId --account $session.accountId --reason rules_impossible_state --priority high --by reviewer_demo
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewer.Console create-case failed with exit code $LASTEXITCODE"
     }
     $case = $caseJson | ConvertFrom-Json
 
     Write-Host "[demo] update case to in_review"
-    dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey update-case --case $case.caseId --status in_review --reviewer reviewer_demo --notes "triage started"
+    dotnet run --project src/Reviewer.Console -- --backend $Backend --internal-api-key $internalKey update-case --case $case.caseId --status in_review --reviewer reviewer_demo --notes "triage started"
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewer.Console update-case failed with exit code $LASTEXITCODE"
     }
 
     Write-Host "[demo] create temporary ban"
-    $banJson = dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey create-ban --account $session.accountId --scope queue --reason confirmed_cheat --evidence $evidenceId --duration-hours 24 --by reviewer_demo
+    $banJson = dotnet run --project src/Reviewer.Console -- --backend $Backend --internal-api-key $internalKey create-ban --account $session.accountId --scope queue --reason confirmed_cheat --evidence $evidenceId --duration-hours 24 --by reviewer_demo
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewer.Console create-ban failed with exit code $LASTEXITCODE"
     }
     $ban = $banJson | ConvertFrom-Json
 
     Write-Host "[demo] list active bans for account"
-    dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey list-bans --account $session.accountId --status active
+    dotnet run --project src/Reviewer.Console -- --backend $Backend --internal-api-key $internalKey list-bans --account $session.accountId --status active
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewer.Console list-bans failed with exit code $LASTEXITCODE"
     }
 
     Write-Host "[demo] create appeal"
-    $appealJson = dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey create-appeal --ban $ban.banId --account $session.accountId --notes "request review"
+    $appealJson = dotnet run --project src/Reviewer.Console -- --backend $Backend --internal-api-key $internalKey create-appeal --ban $ban.banId --account $session.accountId --notes "request review"
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewer.Console create-appeal failed with exit code $LASTEXITCODE"
     }
     $appeal = $appealJson | ConvertFrom-Json
 
     Write-Host "[demo] resolve appeal upheld"
-    dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey resolve-appeal --appeal $appeal.appealId --status upheld --reviewer reviewer_demo --notes "evidence sufficient"
+    dotnet run --project src/Reviewer.Console -- --backend $Backend --internal-api-key $internalKey resolve-appeal --appeal $appeal.appealId --status upheld --reviewer reviewer_demo --notes "evidence sufficient"
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewer.Console resolve-appeal failed with exit code $LASTEXITCODE"
     }

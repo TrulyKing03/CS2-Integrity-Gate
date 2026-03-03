@@ -36,7 +36,7 @@ try {
     Start-Sleep -Seconds 8
 
     Write-Host "[smoke-ban] launcher baseline (should succeed)"
-    dotnet run --project src/Launcher.App -- --backend $Backend --account $accountId --steam $steamId --keep-runtime
+    dotnet run --project src/Launcher.App -- --backend $Backend --account $accountId --steam $steamId --token-wait-sec 180 --keep-runtime
     if ($LASTEXITCODE -ne 0) {
         throw "Baseline launcher run failed."
     }
@@ -56,6 +56,7 @@ try {
         "--backend", $Backend,
         "--account", $accountId,
         "--steam", $steamId,
+        "--token-wait-sec", "180",
         "--keep-runtime"
     ) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $blockedOut -RedirectStandardError $blockedErr
     $blockedExit = $blockedProcess.ExitCode
@@ -81,7 +82,7 @@ try {
     }
 
     Write-Host "[smoke-ban] launcher after overturn (should succeed)"
-    dotnet run --project src/Launcher.App -- --backend $Backend --account $accountId --steam $steamId --keep-runtime
+    dotnet run --project src/Launcher.App -- --backend $Backend --account $accountId --steam $steamId --token-wait-sec 180 --keep-runtime
     if ($LASTEXITCODE -ne 0) {
         throw "Launcher failed after overturned appeal."
     }

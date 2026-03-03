@@ -47,6 +47,7 @@ This repo contains multiple active .NET projects plus staged domain folders and 
 - `src/Reviewer.Console`: moderation and appeals CLI for internal endpoints.
 - `analytics/detection-tuning`: offline threshold tuning job(s) for detector calibration.
 - `ops/`: infrastructure, observability, security, and runbooks.
+- `ops/stack.settings.sample.json`: centralized local settings for scripted scenarios.
 - `scripts/`: helper scripts for startup and smoke tests.
 
 The full design spec is included in:
@@ -500,6 +501,12 @@ QA runner:
 powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Fast
 ```
 
+Scenario runner (single entrypoint for scripted flows):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario smoke -SettingsPath ops/stack.settings.sample.json
+```
+
 Reviewer end-to-end demo:
 
 ```powershell
@@ -692,6 +699,7 @@ No telemetry actions generated:
 |   |-- run-controlplane.ps1
 |   |-- run-ac-service.ps1
 |   |-- run-launcher.ps1
+|   |-- run-scenario.ps1
 |   |-- run-threshold-tuner.ps1
 |   |-- smoke-test.ps1
 |   |-- smoke-ban-lifecycle.ps1

@@ -1,0 +1,7 @@
+{
+  "backendBaseUrl": "http://localhost:5042",
+  "serverApiKey": "dev-server-api-key",
+  "internalApiKey": "dev-internal-api-key",
+  "defaultQueueType": "high_trust",
+  "runtimeDir": "runtime"
+}

@@ -1,3 +1,7 @@
+param(
+    [string]$Backend = "http://localhost:5042"
+)
+
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
@@ -16,10 +20,10 @@ Remove-Item $sessionPath -ErrorAction SilentlyContinue
 Remove-Item $tokenPath -ErrorAction SilentlyContinue
 
 $apiJob = Start-Job -ScriptBlock {
-    param($r)
+    param($r, $u)
     Set-Location $r
-    dotnet run --project src/ControlPlane.Api --urls http://localhost:5042
-} -ArgumentList $repo
+    dotnet run --project src/ControlPlane.Api --urls $u
+} -ArgumentList $repo, $Backend
 
 $acJob = Start-Job -ScriptBlock {
     param($r)
@@ -31,7 +35,7 @@ try {
     Start-Sleep -Seconds 8
 
     Write-Host "[smoke] running launcher..."
-    dotnet run --project src/Launcher.App -- --backend http://localhost:5042 --account $accountId --steam $steamId --keep-runtime
+    dotnet run --project src/Launcher.App -- --backend $Backend --account $accountId --steam $steamId --token-wait-sec 180 --keep-runtime
     if ($LASTEXITCODE -ne 0) {
         throw "Launcher failed with exit code $LASTEXITCODE"
     }
@@ -40,7 +44,7 @@ try {
     $token = Get-Content $tokenPath | ConvertFrom-Json
 
     Write-Host "[smoke] running server bridge (simulated cheat telemetry)..."
-    dotnet run --project tools/simulators/ServerBridge.Agent -- --backend http://localhost:5042 --server-api-key $serverKey --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken --simulate-cheat --runtime-sec 8
+    dotnet run --project tools/simulators/ServerBridge.Agent -- --backend $Backend --server-api-key $serverKey --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken --simulate-cheat --runtime-sec 8
     if ($LASTEXITCODE -ne 0) {
         throw "Server bridge failed with exit code $LASTEXITCODE"
     }
