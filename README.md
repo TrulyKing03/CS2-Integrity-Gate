@@ -472,6 +472,18 @@ Expected result:
 - Server bridge accepts join.
 - Simulated cheat telemetry triggers rule-based actions.
 
+Ban lifecycle smoke test:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/smoke-ban-lifecycle.ps1
+```
+
+Expected result:
+
+- Baseline queue + token succeeds.
+- Queue is blocked after ban (`account_banned`).
+- Queue succeeds again after appeal is resolved with `overturned`.
+
 Reviewer end-to-end demo:
 
 ```powershell
@@ -655,6 +667,7 @@ No telemetry actions generated:
 |   |-- run-launcher.ps1
 |   |-- run-threshold-tuner.ps1
 |   |-- smoke-test.ps1
+|   |-- smoke-ban-lifecycle.ps1
 |   `-- reviewer-demo.ps1
 |-- tools
 |   `-- simulators
