@@ -17,6 +17,11 @@ public interface ISqliteStore
         string devicePubkeyPem,
         string status,
         CancellationToken cancellationToken);
+    Task<bool> IsDeviceBoundToAccountAsync(
+        string deviceId,
+        string accountId,
+        string steamId,
+        CancellationToken cancellationToken);
     Task CreateMatchSessionAsync(QueueResponse queueResponse, string accountId, string steamId, CancellationToken cancellationToken);
     Task<bool> IsMatchPlayerAsync(string matchSessionId, string accountId, string steamId, CancellationToken cancellationToken);
     Task<string?> GetSteamIdForMatchPlayerAsync(string matchSessionId, string accountId, CancellationToken cancellationToken);
@@ -395,6 +400,30 @@ public sealed class SqliteStore : ISqliteStore
         cmd.Parameters.AddWithValue("$status", status);
         cmd.Parameters.AddWithValue("$last_seen", now.ToString("O"));
         await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<bool> IsDeviceBoundToAccountAsync(
+        string deviceId,
+        string accountId,
+        string steamId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT COUNT(1)
+            FROM devices
+            WHERE device_id = $device_id
+              AND account_id = $account_id
+              AND steam_id = $steam_id
+              AND status = 'enrolled';
+            """;
+        cmd.Parameters.AddWithValue("$device_id", deviceId);
+        cmd.Parameters.AddWithValue("$account_id", accountId);
+        cmd.Parameters.AddWithValue("$steam_id", steamId);
+        var count = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken));
+        return count > 0;
     }
 
     public async Task CreateMatchSessionAsync(

@@ -92,7 +92,7 @@ High-level architecture:
 ## 1) Enrollment and Device Binding
 
 1. AC service generates ECDSA private key if missing.
-2. AC posts `/v1/attestation/enroll` with account, steam, public key.
+2. AC enrolls against the active launcher session identity (account + steam) and posts `/v1/attestation/enroll` with public key.
 3. Backend returns:
 - `device_id`
 - `device_certificate`
@@ -186,7 +186,7 @@ Main capabilities:
 
 - Long-running worker loop: `src/AcClient.Service/Worker.cs`
 - Device key generation and persistence.
-- Enrollment and match-start calls.
+- Enrollment bound to active launcher session identity, then match-start calls.
 - Heartbeat scheduling.
 - Shared runtime file output:
   - `runtime/session.json` (input from launcher)
@@ -660,6 +660,7 @@ For real AC integration:
 - Do not ship with default `JoinTokenSecret`.
 - Do not trust client-only detections for irreversible actions.
 - Keep token TTL short.
+- Reject match start/heartbeat when device identity is not enrolled for the account + steam pair.
 - Enforce single-use token semantics.
 - Separate behavior-based signals from high-confidence integrity/rules.
 - Maintain evidence and review controls before permanent bans.
@@ -684,6 +685,11 @@ For real AC integration:
 `Join denied: stale_heartbeat`:
 
 - Heartbeats are missing or delayed beyond grace window.
+
+`match-start failed: unknown_or_mismatched_device`:
+
+- AC device enrollment does not match the current launcher session account/steam pair.
+- Restart AC service and launcher for a clean enrollment cycle, then requeue.
 
 `Join denied: account_banned`:
 

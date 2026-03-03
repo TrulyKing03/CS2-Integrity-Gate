@@ -17,6 +17,9 @@ public sealed class Worker(
     private readonly AcClientOptions _options = optionsAccessor.Value;
     private readonly HttpClient _httpClient = httpClientFactory.CreateClient("control-plane");
     private string? _deviceId;
+    private string? _devicePublicKeyPem;
+    private string? _enrolledAccountId;
+    private string? _enrolledSteamId;
     private string? _currentMatchSessionId;
     private string? _currentServerId;
     private int _heartbeatIntervalSec = 10;
@@ -28,9 +31,8 @@ public sealed class Worker(
         _httpClient.BaseAddress = new Uri(_options.BackendBaseUrl.TrimEnd('/') + "/");
         EnsureDirectories();
 
-        var publicKeyPem = await EnsureDeviceKeyAsync(_options.DeviceKeyPath, stoppingToken);
-        _deviceId = await EnsureEnrolledAsync(publicKeyPem, stoppingToken);
-        logger.LogInformation("AC client enrolled with DeviceId={DeviceId}", _deviceId);
+        _devicePublicKeyPem = await EnsureDeviceKeyAsync(_options.DeviceKeyPath, stoppingToken);
+        logger.LogInformation("AC device key loaded. Enrollment follows active session identity.");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -79,20 +81,22 @@ public sealed class Worker(
 
     private async Task HandleSessionAsync(QueueSessionState session, CancellationToken cancellationToken)
     {
-        if (_deviceId is null)
+        if (string.IsNullOrWhiteSpace(_devicePublicKeyPem))
         {
-            throw new InvalidOperationException("Device enrollment was not completed.");
+            throw new InvalidOperationException("Device key was not initialized.");
         }
+
+        var deviceId = await EnsureEnrollmentForSessionAsync(session, _devicePublicKeyPem, cancellationToken);
 
         if (!string.Equals(_currentMatchSessionId, session.MatchSessionId, StringComparison.Ordinal))
         {
-            await BeginMatchAsync(session, _deviceId, cancellationToken);
+            await BeginMatchAsync(session, deviceId, cancellationToken);
         }
 
         var now = DateTimeOffset.UtcNow;
         if (now - _lastHeartbeatUtc >= TimeSpan.FromSeconds(_heartbeatIntervalSec))
         {
-            await SendHeartbeatAsync(session, _deviceId, cancellationToken);
+            await SendHeartbeatAsync(session, deviceId, cancellationToken);
         }
     }
 
@@ -187,11 +191,41 @@ public sealed class Worker(
         }
     }
 
-    private async Task<string> EnsureEnrolledAsync(string publicKeyPem, CancellationToken cancellationToken)
+    private async Task<string> EnsureEnrollmentForSessionAsync(
+        QueueSessionState session,
+        string publicKeyPem,
+        CancellationToken cancellationToken)
+    {
+        var sameEnrollment =
+            !string.IsNullOrWhiteSpace(_deviceId) &&
+            string.Equals(_enrolledAccountId, session.AccountId, StringComparison.Ordinal) &&
+            string.Equals(_enrolledSteamId, session.SteamId, StringComparison.Ordinal);
+        if (sameEnrollment)
+        {
+            return _deviceId!;
+        }
+
+        _deviceId = await EnsureEnrolledAsync(session.AccountId, session.SteamId, publicKeyPem, cancellationToken);
+        _enrolledAccountId = session.AccountId;
+        _enrolledSteamId = session.SteamId;
+        logger.LogInformation(
+            "AC enrollment refreshed for account={AccountId}, steam={SteamId}, deviceId={DeviceId}",
+            session.AccountId,
+            session.SteamId,
+            _deviceId);
+
+        return _deviceId;
+    }
+
+    private async Task<string> EnsureEnrolledAsync(
+        string accountId,
+        string steamId,
+        string publicKeyPem,
+        CancellationToken cancellationToken)
     {
         var request = new EnrollRequest(
-            _options.AccountId,
-            _options.SteamId,
+            accountId,
+            steamId,
             publicKeyPem,
             _options.LauncherVersion,
             _options.AcVersion);

@@ -230,6 +230,16 @@ app.MapPost("/v1/attestation/match-start", async (
         });
     }
 
+    var deviceBound = await store.IsDeviceBoundToAccountAsync(
+        request.DeviceId,
+        request.AccountId,
+        request.SteamId,
+        cancellationToken);
+    if (!deviceBound)
+    {
+        return Results.BadRequest(new { error = "unknown_or_mismatched_device" });
+    }
+
     if (!request.PlatformSignals.SecureBoot || !request.PlatformSignals.Tpm20)
     {
         return Results.BadRequest(new { error = "tier_a_requirements_not_met" });
@@ -303,6 +313,30 @@ app.MapPost("/v1/attestation/heartbeat", async (
     if (string.IsNullOrWhiteSpace(steamId))
     {
         return Results.BadRequest(new { error = "unknown_match_player" });
+    }
+
+    var deviceBound = await store.IsDeviceBoundToAccountAsync(
+        request.DeviceId,
+        request.AccountId,
+        steamId,
+        cancellationToken);
+    if (!deviceBound)
+    {
+        var mismatchAt = DateTimeOffset.UtcNow;
+        await store.AddHeartbeatAsync(request, steamId, "unhealthy", cancellationToken);
+        await store.UpsertPlayerHealthAsync(
+            request.MatchSessionId,
+            request.AccountId,
+            steamId,
+            "unhealthy",
+            mismatchAt,
+            "kick",
+            cancellationToken);
+
+        return Results.Ok(new HeartbeatResponse(
+            "unhealthy",
+            policyOptions.Value.HeartbeatIntervalSec,
+            "kick"));
     }
 
     var activeBan = await store.GetActiveBanForAccountAsync(request.AccountId, cancellationToken);
