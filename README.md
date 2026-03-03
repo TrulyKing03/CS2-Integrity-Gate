@@ -613,6 +613,7 @@ Reviewer workflow examples:
 
 ```powershell
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key system-metrics
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-cleanup
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-bans --account $session.accountId --status active

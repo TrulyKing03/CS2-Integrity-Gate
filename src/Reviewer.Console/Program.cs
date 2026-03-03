@@ -20,6 +20,12 @@ switch (options.Command)
         Print(metrics, json);
         break;
     }
+    case "run-cleanup":
+    {
+        var response = await http.PostAsync("v1/ops/cleanup/run", content: null);
+        await EnsureAndPrintAsync(response, json);
+        break;
+    }
     case "list-evidence":
     {
         var route = "v1/evidence";
@@ -203,6 +209,7 @@ static void PrintUsage()
 
     Commands:
       system-metrics
+      run-cleanup
       list-evidence [--match <id>] [--account <id>]
       create-case --evidence <id> --match <id> --account <id> [--reason <code>] [--priority <level>] [--by <actor>]
       list-cases [--status <status>]
