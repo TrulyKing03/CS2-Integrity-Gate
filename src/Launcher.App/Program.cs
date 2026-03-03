@@ -404,6 +404,7 @@ static void PrintUsage()
       help          Show this help
 
     Common options:
+      --profile <json>
       --backend <url>
       --runtime <dir>
       --account <id>
@@ -430,6 +431,7 @@ internal sealed class LauncherOptions
 {
     public string Command { get; private set; } = "play";
     public bool ShowUsage { get; private set; }
+    public string? ProfilePath { get; private set; }
     public string BackendBaseUrl { get; private set; } = "http://localhost:5042";
     public string QueueType { get; private set; } = "high_trust";
     public string RuntimeDir { get; private set; } = "runtime";
@@ -450,6 +452,26 @@ internal sealed class LauncherOptions
         var options = new LauncherOptions();
         for (var i = 0; i < args.Length; i++)
         {
+            if (!string.Equals(args[i], "--profile", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            options.ProfilePath = ReadValue(args, ++i, "--profile");
+            var profilePath = Path.GetFullPath(options.ProfilePath);
+            if (!File.Exists(profilePath))
+            {
+                throw new FileNotFoundException("Launcher profile file not found.", profilePath);
+            }
+
+            var profileContent = File.ReadAllText(profilePath);
+            var profile = JsonSerializer.Deserialize<LauncherProfile>(profileContent, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                ?? throw new InvalidOperationException($"Launcher profile parse failed: {profilePath}");
+            options.ApplyProfile(profile);
+        }
+
+        for (var i = 0; i < args.Length; i++)
+        {
             var arg = args[i];
             if (!arg.StartsWith("--", StringComparison.Ordinal))
             {
@@ -459,6 +481,9 @@ internal sealed class LauncherOptions
 
             switch (arg)
             {
+                case "--profile":
+                    i++;
+                    break;
                 case "--command":
                     options.Command = ReadValue(args, ++i, "--command").Trim().ToLowerInvariant();
                     break;
@@ -518,6 +543,79 @@ internal sealed class LauncherOptions
         return options;
     }
 
+    private void ApplyProfile(LauncherProfile profile)
+    {
+        if (!string.IsNullOrWhiteSpace(profile.Command))
+        {
+            Command = profile.Command.Trim().ToLowerInvariant();
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.BackendBaseUrl))
+        {
+            BackendBaseUrl = profile.BackendBaseUrl;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.QueueType))
+        {
+            QueueType = profile.QueueType;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.RuntimeDir))
+        {
+            RuntimeDir = profile.RuntimeDir;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.Cs2Path))
+        {
+            Cs2Path = profile.Cs2Path;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.Username))
+        {
+            Username = profile.Username;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.Password))
+        {
+            Password = profile.Password;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.AccountId))
+        {
+            AccountId = profile.AccountId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.SteamId))
+        {
+            SteamId = profile.SteamId;
+        }
+
+        if (profile.TokenWaitSec is > 0)
+        {
+            TokenWaitSec = profile.TokenWaitSec.Value;
+        }
+
+        if (profile.DryRun is not null)
+        {
+            DryRun = profile.DryRun.Value;
+        }
+
+        if (profile.KeepRuntimeFiles is not null)
+        {
+            KeepRuntimeFiles = profile.KeepRuntimeFiles.Value;
+        }
+
+        if (profile.SelfValidateJoin is not null)
+        {
+            SelfValidateJoin = profile.SelfValidateJoin.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.ServerApiKey))
+        {
+            ServerApiKey = profile.ServerApiKey;
+        }
+    }
+
     private static string ReadValue(string[] args, int index, string key)
     {
         if (index >= args.Length)
@@ -527,4 +625,22 @@ internal sealed class LauncherOptions
 
         return args[index];
     }
+}
+
+internal sealed class LauncherProfile
+{
+    public string? Command { get; set; }
+    public string? BackendBaseUrl { get; set; }
+    public string? QueueType { get; set; }
+    public string? RuntimeDir { get; set; }
+    public string? Cs2Path { get; set; }
+    public string? Username { get; set; }
+    public string? Password { get; set; }
+    public string? AccountId { get; set; }
+    public string? SteamId { get; set; }
+    public int? TokenWaitSec { get; set; }
+    public bool? DryRun { get; set; }
+    public bool? KeepRuntimeFiles { get; set; }
+    public bool? SelfValidateJoin { get; set; }
+    public string? ServerApiKey { get; set; }
 }

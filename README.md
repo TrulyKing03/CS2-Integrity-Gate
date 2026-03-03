@@ -203,6 +203,7 @@ Main capabilities:
   - `doctor` (backend/runtime diagnostics),
   - `status`,
   - `clear-runtime`.
+- Profile-based config supported via `--profile <json>` (sample: `src/Launcher.App/launcher.profile.sample.json`).
 - Optional `--self-validate` exists for diagnostics only.
 
 ## `tools/simulators/ServerBridge.Agent`
@@ -555,6 +556,7 @@ Launcher diagnostics:
 ```powershell
 dotnet run --project src/Launcher.App -- doctor --backend http://localhost:5042
 dotnet run --project src/Launcher.App -- status --runtime runtime
+dotnet run --project src/Launcher.App -- play --profile src/Launcher.App/launcher.profile.sample.json
 ```
 
 ## Runbook
