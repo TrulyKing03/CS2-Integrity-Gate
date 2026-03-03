@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using ControlPlane.Api.Options;
 using ControlPlane.Api.Persistence;
 using ControlPlane.Api.Security;
@@ -13,6 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<AcPolicyOptions>(builder.Configuration.GetSection(AcPolicyOptions.SectionName));
 builder.Services.Configure<ApiAuthOptions>(builder.Configuration.GetSection(ApiAuthOptions.SectionName));
+builder.Services.Configure<ApiRateLimitOptions>(builder.Configuration.GetSection(ApiRateLimitOptions.SectionName));
 builder.Services.Configure<EvidenceOptions>(builder.Configuration.GetSection(EvidenceOptions.SectionName));
 builder.Services.AddSingleton<ISqliteStore, SqliteStore>();
 builder.Services.AddSingleton<IJoinTokenService, JoinTokenService>();
@@ -20,12 +22,51 @@ builder.Services.AddSingleton<IDetectionEngine, DetectionEngine>();
 builder.Services.AddSingleton<IEvidenceService, EvidenceService>();
 builder.Services.AddHostedService<StartupInitializer>();
 
+var rateLimitOptions =
+    builder.Configuration.GetSection(ApiRateLimitOptions.SectionName).Get<ApiRateLimitOptions>() ??
+    new ApiRateLimitOptions();
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        return new ValueTask(context.HttpContext.Response.WriteAsJsonAsync(
+            new { error = "rate_limited" },
+            cancellationToken: cancellationToken));
+    };
+
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+    {
+        var path = httpContext.Request.Path.Value ?? "/";
+        var policyName = ResolveRateLimitPolicy(path);
+        return policyName switch
+        {
+            "public_auth" => CreatePartition(
+                $"public_auth:{ReadRemoteAddress(httpContext)}",
+                rateLimitOptions.PublicAuth),
+            "public_client" => CreatePartition(
+                $"public_client:{ReadRemoteAddress(httpContext)}",
+                rateLimitOptions.PublicClient),
+            "server_api" => CreatePartition(
+                $"server_api:{ReadHeaderOrFallback(httpContext, "X-Server-Api-Key")}",
+                rateLimitOptions.ServerApi),
+            "internal_api" => CreatePartition(
+                $"internal_api:{ReadHeaderOrFallback(httpContext, "X-Internal-Api-Key")}",
+                rateLimitOptions.InternalApi),
+            _ => RateLimitPartition.GetNoLimiter("system")
+        };
+    });
+});
+
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
 });
 
 var app = builder.Build();
+app.UseRateLimiter();
 
 app.MapGet("/", () => Results.Ok(new
 {
@@ -37,9 +78,11 @@ app.MapGet("/", () => Results.Ok(new
 app.MapGet("/healthz", () => Results.Ok(new { ok = true, utc = DateTimeOffset.UtcNow }));
 
 app.MapGet("/v1/policy/current", (
-    IOptions<AcPolicyOptions> policyOptions) =>
+    IOptions<AcPolicyOptions> policyOptions,
+    IOptions<ApiRateLimitOptions> rateLimitPolicy) =>
 {
     var policy = policyOptions.Value;
+    var rateLimits = rateLimitPolicy.Value;
     return Results.Ok(new
     {
         policyVersion = policy.PolicyVersion,
@@ -47,7 +90,8 @@ app.MapGet("/v1/policy/current", (
         heartbeatIntervalSec = policy.HeartbeatIntervalSec,
         graceWindowSec = policy.GraceWindowSec,
         requiredTierA = policy.RequiredTierA,
-        requiredTierB = policy.RequiredTierB
+        requiredTierB = policy.RequiredTierB,
+        apiRateLimit = rateLimits
     });
 });
 
@@ -825,6 +869,69 @@ static string NormalizeQueueType(string queueType)
 
     var normalized = queueType.Trim().ToLowerInvariant();
     return normalized is "high_trust" or "standard" ? normalized : "high_trust";
+}
+
+static RateLimitPartition<string> CreatePartition(string key, FixedWindowBucketOptions options)
+{
+    return RateLimitPartition.GetFixedWindowLimiter(
+        key,
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = options.PermitLimit,
+            Window = TimeSpan.FromSeconds(options.WindowSeconds),
+            QueueLimit = options.QueueLimit,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            AutoReplenishment = true
+        });
+}
+
+static string ResolveRateLimitPolicy(string path)
+{
+    if (path.StartsWith("/v1/auth/", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/queue/", StringComparison.OrdinalIgnoreCase))
+    {
+        return "public_auth";
+    }
+
+    if (path.StartsWith("/v1/attestation/enroll", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/attestation/match-start", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/attestation/heartbeat", StringComparison.OrdinalIgnoreCase))
+    {
+        return "public_client";
+    }
+
+    if (path.StartsWith("/v1/attestation/validate-join", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/attestation/match-health", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/telemetry/", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/enforcement/actions", StringComparison.OrdinalIgnoreCase))
+    {
+        return "server_api";
+    }
+
+    if (path.StartsWith("/v1/evidence", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/review/", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/moderation/", StringComparison.OrdinalIgnoreCase))
+    {
+        return "internal_api";
+    }
+
+    return "system";
+}
+
+static string ReadHeaderOrFallback(HttpContext context, string headerName)
+{
+    if (context.Request.Headers.TryGetValue(headerName, out var value) &&
+        !string.IsNullOrWhiteSpace(value))
+    {
+        return value.ToString();
+    }
+
+    return ReadRemoteAddress(context);
+}
+
+static string ReadRemoteAddress(HttpContext context)
+{
+    return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 }
 
 static IResult? EnsureServerAuthorized(HttpContext context, ApiAuthOptions options)

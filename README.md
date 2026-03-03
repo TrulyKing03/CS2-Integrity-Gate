@@ -322,6 +322,11 @@ Internal-auth protected endpoints:
   - `/v1/review/*`
   - `/v1/moderation/*`
 
+Rate limiting:
+
+- Global rate limiting is enabled for `public_auth`, `public_client`, `server_api`, and `internal_api` surfaces.
+- Rejected requests return HTTP `429` with payload `{ "error": "rate_limited" }`.
+
 ## Telemetry and Detection
 
 Implemented channels in detection engine:
@@ -403,6 +408,10 @@ Key sections:
 - `AcPolicy.RequiredTierB`
 - `ApiAuth.ServerApiKey`
 - `ApiAuth.InternalApiKey`
+- `ApiRateLimit.PublicAuth`
+- `ApiRateLimit.PublicClient`
+- `ApiRateLimit.ServerApi`
+- `ApiRateLimit.InternalApi`
 - `Evidence.StorageDirectory`
 - `Evidence.RecentTelemetryLimit`
 - `Evidence.RecentHeartbeatsLimit`
