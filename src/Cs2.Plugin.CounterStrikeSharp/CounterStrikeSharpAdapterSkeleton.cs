@@ -7,15 +7,27 @@ namespace Cs2.Plugin.CounterStrikeSharp;
 public sealed class CounterStrikeSharpAdapterSkeleton
 {
     private readonly PluginRuntime _runtime;
+    private readonly MatchRuntimeCoordinator _coordinator;
 
-    public CounterStrikeSharpAdapterSkeleton(PluginRuntime runtime)
+    public CounterStrikeSharpAdapterSkeleton(PluginRuntime runtime, MatchRuntimeCoordinator coordinator)
     {
         _runtime = runtime;
+        _coordinator = coordinator;
     }
 
     public Task OnPlayerConnectAttemptAsync(PlayerConnectionAttempt attempt, CancellationToken cancellationToken)
     {
         return _runtime.HandleConnectionAttemptAsync(attempt, cancellationToken);
+    }
+
+    public void OnPlayerConnected(PlayerSessionIdentity session)
+    {
+        _coordinator.TrackPlayer(session);
+    }
+
+    public Task OnPlayerDisconnectedAsync(PlayerSessionIdentity session)
+    {
+        return _coordinator.UntrackPlayerAsync(session);
     }
 
     public Task OnTickAsync(TickSample sample, CancellationToken cancellationToken)
@@ -36,15 +48,5 @@ public sealed class CounterStrikeSharpAdapterSkeleton
     public Task OnRoundBoundaryAsync(string matchSessionId, CancellationToken cancellationToken)
     {
         return _runtime.FlushTelemetryAsync(matchSessionId, cancellationToken);
-    }
-
-    public Task OnHealthPollTickAsync(string matchSessionId, CancellationToken cancellationToken)
-    {
-        return _runtime.PollHealthAndEnforceAsync(matchSessionId, cancellationToken);
-    }
-
-    public Task OnActionPollTickAsync(string matchSessionId, string? accountId, CancellationToken cancellationToken)
-    {
-        return _runtime.PollPendingActionsAndApplyAsync(matchSessionId, accountId, cancellationToken);
     }
 }

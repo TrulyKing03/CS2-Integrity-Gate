@@ -8,4 +8,6 @@ public sealed class PluginRuntimeOptions
     public string TelemetrySource { get; set; } = "cs2_plugin_counterstrikesharp";
     public int MaxBatchSize { get; set; } = 64;
     public int TelemetryFlushSec { get; set; } = 3;
+    public int HealthPollSec { get; set; } = 5;
+    public int ActionPollSec { get; set; } = 3;
 }

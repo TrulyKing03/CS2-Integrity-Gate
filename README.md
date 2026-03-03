@@ -207,7 +207,7 @@ Main capabilities:
 - Simulates server-side gate behavior through `Cs2.Plugin.CounterStrikeSharp` runtime.
 - Uses host-bridge callbacks for allow/deny/action handling.
 - Sends synthetic telemetry via runtime buffering and flush path.
-- Polls pending actions and sends action acknowledgments.
+- Uses match worker coordinator for periodic health/action polling and acknowledgments.
 
 Use this as the runtime integration reference before binding to a real CS2 plugin host.
 ## `Cs2.Plugin.CounterStrikeSharp`
@@ -219,9 +219,10 @@ Main capabilities:
   - telemetry buffering and flush,
   - match-health polling and transition-based enforcement,
   - pending-action polling and acknowledgment.
+- Match runtime coordinator for per-match background loops while players are connected.
 - Typed backend client with server API-key auth header.
 - Host bridge abstraction (`IPluginHostBridge`) so game-framework glue remains isolated.
-- CounterStrikeSharp adapter skeleton ready for event-hook wiring.
+- CounterStrikeSharp adapter skeleton ready for event-hook wiring (`connect_attempt`, `connected`, `disconnected`, telemetry events).
 
 ## `Shared.Contracts`
 

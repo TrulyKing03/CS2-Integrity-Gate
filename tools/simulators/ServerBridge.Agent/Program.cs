@@ -11,10 +11,13 @@ var runtimeOptions = new PluginRuntimeOptions
     ExecutorId = options.ExecutorId,
     TelemetrySource = "server_bridge_agent_runtime",
     MaxBatchSize = options.MaxBatchSize,
-    TelemetryFlushSec = options.FlushSec
+    TelemetryFlushSec = options.FlushSec,
+    HealthPollSec = options.HealthPollSec,
+    ActionPollSec = options.ActionPollSec
 };
 
 using var runtime = new PluginRuntime(runtimeOptions, hostBridge);
+await using var coordinator = new MatchRuntimeCoordinator(runtime, hostBridge, runtimeOptions);
 
 await runtime.HandleConnectionAttemptAsync(
     new PlayerConnectionAttempt(
@@ -32,6 +35,7 @@ if (!hostBridge.ConnectionAccepted)
 }
 
 Console.WriteLine($"Join accepted for account={options.AccountId}, match={options.MatchSessionId}");
+coordinator.TrackPlayer(new PlayerSessionIdentity(options.MatchSessionId, options.AccountId, options.SteamId));
 
 var tick = options.StartTick;
 var loopUntil = DateTimeOffset.UtcNow.AddSeconds(options.RuntimeSec);
@@ -71,13 +75,11 @@ while (DateTimeOffset.UtcNow < loopUntil)
             HitSteamId: options.TargetSteamId),
         CancellationToken.None);
 
-    await runtime.PollHealthAndEnforceAsync(options.MatchSessionId, CancellationToken.None);
-    await runtime.PollPendingActionsAndApplyAsync(options.MatchSessionId, options.AccountId, CancellationToken.None);
-
     await Task.Delay(TimeSpan.FromSeconds(options.TickIntervalSec));
 }
 
 await runtime.FlushTelemetryAsync(options.MatchSessionId, CancellationToken.None);
+await coordinator.UntrackPlayerAsync(new PlayerSessionIdentity(options.MatchSessionId, options.AccountId, options.SteamId));
 
 Console.WriteLine($"Server bridge simulation complete. AppliedActions={hostBridge.AppliedActions.Count}");
 
@@ -169,6 +171,8 @@ internal sealed class AgentOptions
     public int TickIntervalSec { get; private set; } = 2;
     public int MaxBatchSize { get; private set; } = 64;
     public int FlushSec { get; private set; } = 3;
+    public int HealthPollSec { get; private set; } = 5;
+    public int ActionPollSec { get; private set; } = 3;
     public long StartTick { get; private set; } = 1000;
     public bool SimulateCheat { get; private set; }
 
@@ -215,6 +219,12 @@ internal sealed class AgentOptions
                     break;
                 case "--flush-sec":
                     options.FlushSec = int.Parse(ReadValue(args, ++i, "--flush-sec"));
+                    break;
+                case "--health-poll-sec":
+                    options.HealthPollSec = int.Parse(ReadValue(args, ++i, "--health-poll-sec"));
+                    break;
+                case "--action-poll-sec":
+                    options.ActionPollSec = int.Parse(ReadValue(args, ++i, "--action-poll-sec"));
                     break;
             }
         }

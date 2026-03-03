@@ -11,7 +11,16 @@ Included:
   - telemetry buffering and flush,
   - health polling and action application,
   - pending-action polling with acknowledgments.
+- `MatchRuntimeCoordinator`: per-match background worker that runs health/action poll loops while players are connected.
 - `IPluginHostBridge`: abstraction for game-server actions (deny/accept/apply/log).
 - `CounterStrikeSharpAdapterSkeleton`: host-facing call surface for real CounterStrikeSharp event hooks.
 
 This code intentionally avoids direct CounterStrikeSharp package references so it can compile in CI and local development before CS2 server binding is added.
+
+Typical host flow:
+
+1. Create `PluginRuntime` + `MatchRuntimeCoordinator`.
+2. On connect attempt: call `OnPlayerConnectAttemptAsync`.
+3. When player is accepted and fully connected in your host: call `OnPlayerConnected`.
+4. Feed ticks/shots/visibility to the adapter.
+5. On disconnect: call `OnPlayerDisconnectedAsync`.
