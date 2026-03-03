@@ -546,7 +546,10 @@ QA runner:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Fast
+powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Fast -ReportPath runtime/qa-reports/qa-fast.json
 ```
+
+`qa-run.ps1` now writes a structured JSON report on every run (default: `runtime/qa-reports/qa-<utcstamp>.json`).
 
 Scenario runner (single entrypoint for scripted flows):
 
