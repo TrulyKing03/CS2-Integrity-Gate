@@ -3,6 +3,12 @@ using System.Text.Json;
 using Shared.Contracts;
 
 var options = LauncherOptions.Parse(args);
+if (options.ShowUsage)
+{
+    PrintUsage();
+    return;
+}
+
 var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 
 var runtimeDir = Path.GetFullPath(options.RuntimeDir);
@@ -17,32 +23,46 @@ using var http = new HttpClient
 
 try
 {
-    string accountId = options.AccountId;
-    string steamId = options.SteamId;
-
-    if (string.IsNullOrWhiteSpace(accountId) || string.IsNullOrWhiteSpace(steamId))
+    switch (options.Command)
     {
-        var loginRequest = new LoginRequest(
-            options.Username ?? "local_player",
-            options.Password ?? "local_password");
-        var loginResponse = await http.PostAsJsonAsync("v1/auth/login", loginRequest, jsonOptions);
-        var login = await ReadSuccessOrThrowAsync<LoginResponse>(loginResponse, jsonOptions, "login");
-        accountId = login.AccountId;
-        steamId = login.SteamId;
+        case "play":
+            await RunPlayAsync(http, options, sessionFile, joinTokenFile, jsonOptions);
+            break;
+        case "doctor":
+            await RunDoctorAsync(http, options, sessionFile, joinTokenFile, jsonOptions);
+            break;
+        case "status":
+            RunStatus(options, sessionFile, joinTokenFile, jsonOptions);
+            break;
+        case "clear-runtime":
+            ClearRuntime(sessionFile, joinTokenFile);
+            break;
+        default:
+            throw new ArgumentException(
+                $"Unknown command: {options.Command}. Expected play|doctor|status|clear-runtime|help");
     }
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"Launcher failed: {ex.Message}");
+    Environment.ExitCode = 1;
+}
 
-    if (!string.IsNullOrWhiteSpace(options.SteamId))
-    {
-        steamId = options.SteamId;
-    }
-
-    var queueRequest = new QueueRequest(accountId, steamId, options.QueueType);
+static async Task RunPlayAsync(
+    HttpClient http,
+    LauncherOptions options,
+    string sessionFile,
+    string joinTokenFile,
+    JsonSerializerOptions jsonOptions)
+{
+    var identity = await ResolveIdentityAsync(http, options, jsonOptions);
+    var queueRequest = new QueueRequest(identity.AccountId, identity.SteamId, options.QueueType);
     var queueResponseHttp = await http.PostAsJsonAsync("v1/queue/enqueue", queueRequest, jsonOptions);
     var queue = await ReadSuccessOrThrowAsync<QueueResponse>(queueResponseHttp, jsonOptions, "queue");
 
     var session = new QueueSessionState(
-        accountId,
-        steamId,
+        identity.AccountId,
+        identity.SteamId,
         queue.MatchSessionId,
         queue.ServerId,
         queue.QueueType,
@@ -59,7 +79,7 @@ try
     var joinTokenData = await WaitForJoinTokenAsync(
         joinTokenFile,
         queue.MatchSessionId,
-        accountId,
+        identity.AccountId,
         timeout: TimeSpan.FromSeconds(options.TokenWaitSec),
         jsonOptions);
     if (joinTokenData is null)
@@ -73,8 +93,8 @@ try
         http.DefaultRequestHeaders.Add("X-Server-Api-Key", options.ServerApiKey);
         var validateRequest = new ValidateJoinRequest(
             queue.ServerId,
-            steamId,
-            accountId,
+            identity.SteamId,
+            identity.AccountId,
             queue.MatchSessionId,
             joinTokenData.JoinToken);
         var validateResponseHttp = await http.PostAsJsonAsync("v1/attestation/validate-join", validateRequest, jsonOptions);
@@ -107,23 +127,187 @@ try
         }) ?? throw new InvalidOperationException("Failed to launch CS2 process.");
     }
 
-    fileCleanup();
+    if (!options.KeepRuntimeFiles && File.Exists(sessionFile))
+    {
+        File.Delete(sessionFile);
+    }
+
     Console.WriteLine("Launcher flow complete.");
 }
-catch (Exception ex)
+
+static async Task RunDoctorAsync(
+    HttpClient http,
+    LauncherOptions options,
+    string sessionFile,
+    string joinTokenFile,
+    JsonSerializerOptions jsonOptions)
 {
-    Console.Error.WriteLine($"Launcher failed: {ex.Message}");
-    Environment.ExitCode = 1;
+    var checks = new List<(string Name, bool Ok, string Details)>();
+
+    try
+    {
+        var response = await http.GetAsync("healthz");
+        checks.Add((
+            "backend_healthz",
+            response.IsSuccessStatusCode,
+            response.IsSuccessStatusCode ? "ok" : $"{(int)response.StatusCode} {response.ReasonPhrase}"));
+    }
+    catch (Exception ex)
+    {
+        checks.Add(("backend_healthz", false, ex.Message));
+    }
+
+    checks.Add((
+        "cs2_path",
+        File.Exists(options.Cs2Path),
+        options.Cs2Path));
+
+    checks.Add((
+        "runtime_dir",
+        Directory.Exists(options.RuntimeDir),
+        Path.GetFullPath(options.RuntimeDir)));
+
+    if (TryReadJson<QueueSessionState>(sessionFile, jsonOptions, out var session, out var sessionError))
+    {
+        checks.Add((
+            "runtime_session",
+            true,
+            $"match={session!.MatchSessionId} account={session.AccountId} created={session.CreatedAtUtc:O}"));
+    }
+    else
+    {
+        checks.Add(("runtime_session", false, sessionError));
+    }
+
+    if (TryReadJson<JoinTokenFile>(joinTokenFile, jsonOptions, out var token, out var tokenError))
+    {
+        var freshness = token!.ExpiresAtUtc > DateTimeOffset.UtcNow ? "fresh" : "expired";
+        checks.Add((
+            "runtime_join_token",
+            token.ExpiresAtUtc > DateTimeOffset.UtcNow,
+            $"match={token.MatchSessionId} expires={token.ExpiresAtUtc:O} ({freshness})"));
+    }
+    else
+    {
+        checks.Add(("runtime_join_token", false, tokenError));
+    }
+
+    var failed = checks.Count(check => !check.Ok);
+    foreach (var check in checks)
+    {
+        var prefix = check.Ok ? "[OK]" : "[FAIL]";
+        Console.WriteLine($"{prefix} {check.Name}: {check.Details}");
+    }
+
+    Console.WriteLine($"Doctor summary: total={checks.Count}, failed={failed}");
+    if (failed > 0)
+    {
+        Environment.ExitCode = 1;
+    }
 }
 
-void fileCleanup()
+static void RunStatus(
+    LauncherOptions options,
+    string sessionFile,
+    string joinTokenFile,
+    JsonSerializerOptions jsonOptions)
 {
-    if (!options.KeepRuntimeFiles)
+    Console.WriteLine($"Launcher command: {options.Command}");
+    Console.WriteLine($"Backend: {options.BackendBaseUrl}");
+    Console.WriteLine($"Runtime: {Path.GetFullPath(options.RuntimeDir)}");
+    Console.WriteLine($"Queue: {options.QueueType}");
+
+    if (TryReadJson<QueueSessionState>(sessionFile, jsonOptions, out var session, out _))
     {
-        if (File.Exists(sessionFile))
+        Console.WriteLine(
+            $"Session: match={session!.MatchSessionId} account={session.AccountId} server={session.ServerId} created={session.CreatedAtUtc:O}");
+    }
+    else
+    {
+        Console.WriteLine("Session: missing");
+    }
+
+    if (TryReadJson<JoinTokenFile>(joinTokenFile, jsonOptions, out var token, out _))
+    {
+        var state = token!.ExpiresAtUtc > DateTimeOffset.UtcNow ? "fresh" : "expired";
+        Console.WriteLine($"JoinToken: match={token.MatchSessionId} expires={token.ExpiresAtUtc:O} ({state})");
+    }
+    else
+    {
+        Console.WriteLine("JoinToken: missing");
+    }
+}
+
+static void ClearRuntime(string sessionFile, string joinTokenFile)
+{
+    if (File.Exists(sessionFile))
+    {
+        File.Delete(sessionFile);
+    }
+
+    if (File.Exists(joinTokenFile))
+    {
+        File.Delete(joinTokenFile);
+    }
+
+    Console.WriteLine("Runtime files cleared.");
+}
+
+static async Task<(string AccountId, string SteamId)> ResolveIdentityAsync(
+    HttpClient http,
+    LauncherOptions options,
+    JsonSerializerOptions jsonOptions)
+{
+    var accountId = options.AccountId;
+    var steamId = options.SteamId;
+    if (!string.IsNullOrWhiteSpace(accountId) && !string.IsNullOrWhiteSpace(steamId))
+    {
+        return (accountId, steamId);
+    }
+
+    var loginRequest = new LoginRequest(
+        options.Username ?? "local_player",
+        options.Password ?? "local_password");
+    var loginResponse = await http.PostAsJsonAsync("v1/auth/login", loginRequest, jsonOptions);
+    var login = await ReadSuccessOrThrowAsync<LoginResponse>(loginResponse, jsonOptions, "login");
+    if (!string.IsNullOrWhiteSpace(options.SteamId))
+    {
+        return (login.AccountId, options.SteamId);
+    }
+
+    return (login.AccountId, login.SteamId);
+}
+
+static bool TryReadJson<T>(
+    string path,
+    JsonSerializerOptions jsonOptions,
+    out T? value,
+    out string error)
+{
+    value = default;
+    error = string.Empty;
+    if (!File.Exists(path))
+    {
+        error = "missing";
+        return false;
+    }
+
+    try
+    {
+        var content = File.ReadAllText(path);
+        value = JsonSerializer.Deserialize<T>(content, jsonOptions);
+        if (value is null)
         {
-            File.Delete(sessionFile);
+            error = "parse_failed";
+            return false;
         }
+
+        return true;
+    }
+    catch (Exception ex)
+    {
+        error = ex.Message;
+        return false;
     }
 }
 
@@ -206,6 +390,34 @@ static string TryExtractApiError(string body)
     return $"body={body}";
 }
 
+static void PrintUsage()
+{
+    Console.WriteLine("""
+    Launcher.App usage:
+      dotnet run --project src/Launcher.App -- [command] [options]
+
+    Commands:
+      play          Queue + wait for join token + print launch command (default)
+      doctor        Validate backend/cs2/runtime/session/token status
+      status        Show launcher and runtime status
+      clear-runtime Delete runtime/session.json and runtime/join-token.json
+      help          Show this help
+
+    Common options:
+      --backend <url>
+      --runtime <dir>
+      --account <id>
+      --steam <id>
+      --queue <high_trust|standard>
+      --token-wait-sec <n>
+      --cs2-path <path>
+      --self-validate
+      --server-api-key <key>
+      --keep-runtime
+      --no-dry-run
+    """);
+}
+
 internal sealed record JoinTokenFile(
     string MatchSessionId,
     string AccountId,
@@ -216,6 +428,8 @@ internal sealed record JoinTokenFile(
 
 internal sealed class LauncherOptions
 {
+    public string Command { get; private set; } = "play";
+    public bool ShowUsage { get; private set; }
     public string BackendBaseUrl { get; private set; } = "http://localhost:5042";
     public string QueueType { get; private set; } = "high_trust";
     public string RuntimeDir { get; private set; } = "runtime";
@@ -226,8 +440,8 @@ internal sealed class LauncherOptions
     public string SteamId { get; private set; } = string.Empty;
     public int TokenWaitSec { get; private set; } = 90;
     public bool DryRun { get; private set; } = true;
-    public bool KeepRuntimeFiles { get; private set; } = false;
-    public bool SelfValidateJoin { get; private set; } = false;
+    public bool KeepRuntimeFiles { get; private set; }
+    public bool SelfValidateJoin { get; private set; }
     public string ServerApiKey { get; private set; } =
         Environment.GetEnvironmentVariable("CS2IG_SERVER_API_KEY") ?? "dev-server-api-key";
 
@@ -237,8 +451,17 @@ internal sealed class LauncherOptions
         for (var i = 0; i < args.Length; i++)
         {
             var arg = args[i];
+            if (!arg.StartsWith("--", StringComparison.Ordinal))
+            {
+                options.Command = arg.Trim().ToLowerInvariant();
+                continue;
+            }
+
             switch (arg)
             {
+                case "--command":
+                    options.Command = ReadValue(args, ++i, "--command").Trim().ToLowerInvariant();
+                    break;
                 case "--backend":
                     options.BackendBaseUrl = ReadValue(args, ++i, "--backend");
                     break;
@@ -278,7 +501,18 @@ internal sealed class LauncherOptions
                 case "--server-api-key":
                     options.ServerApiKey = ReadValue(args, ++i, "--server-api-key");
                     break;
+                case "--help":
+                case "-h":
+                    options.ShowUsage = true;
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown option {arg}");
             }
+        }
+
+        if (options.Command is "help")
+        {
+            options.ShowUsage = true;
         }
 
         return options;
