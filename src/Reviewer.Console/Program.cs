@@ -26,6 +26,13 @@ switch (options.Command)
         await EnsureAndPrintAsync(response, json);
         break;
     }
+    case "cleanup-status":
+    {
+        var status = await http.GetFromJsonAsync<object>("v1/ops/cleanup/status", json)
+            ?? throw new InvalidOperationException("cleanup status response was empty");
+        Print(status, json);
+        break;
+    }
     case "list-evidence":
     {
         var route = "v1/evidence";
@@ -210,6 +217,7 @@ static void PrintUsage()
     Commands:
       system-metrics
       run-cleanup
+      cleanup-status
       list-evidence [--match <id>] [--account <id>]
       create-case --evidence <id> --match <id> --account <id> [--reason <code>] [--priority <level>] [--by <actor>]
       list-cases [--status <status>]

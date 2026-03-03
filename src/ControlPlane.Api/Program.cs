@@ -21,6 +21,7 @@ builder.Services.AddSingleton<ISqliteStore, SqliteStore>();
 builder.Services.AddSingleton<IJoinTokenService, JoinTokenService>();
 builder.Services.AddSingleton<IDetectionEngine, DetectionEngine>();
 builder.Services.AddSingleton<IEvidenceService, EvidenceService>();
+builder.Services.AddSingleton<RetentionCleanupState>();
 builder.Services.AddHostedService<StartupInitializer>();
 builder.Services.AddHostedService<RetentionCleanupWorker>();
 
@@ -117,6 +118,7 @@ app.MapGet("/v1/metrics/summary", async (
 app.MapPost("/v1/ops/cleanup/run", async (
     HttpContext context,
     ISqliteStore store,
+    RetentionCleanupState state,
     IOptions<ApiAuthOptions> apiAuthOptions,
     IOptions<DataRetentionOptions> retentionOptions,
     CancellationToken cancellationToken) =>
@@ -134,7 +136,22 @@ app.MapPost("/v1/ops/cleanup/run", async (
         TimeSpan.FromHours(Math.Max(1, options.HeartbeatRetentionHours)),
         TimeSpan.FromHours(Math.Max(1, options.TelemetryRetentionHours)),
         cancellationToken);
+    state.SetSuccess(result);
     return Results.Ok(result);
+});
+
+app.MapGet("/v1/ops/cleanup/status", (
+    HttpContext context,
+    RetentionCleanupState state,
+    IOptions<ApiAuthOptions> apiAuthOptions) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    return Results.Ok(state.Snapshot());
 });
 
 app.MapPost("/v1/auth/login", async (

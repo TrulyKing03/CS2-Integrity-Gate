@@ -7,6 +7,7 @@ namespace ControlPlane.Api.Services;
 public sealed class RetentionCleanupWorker(
     ISqliteStore store,
     IOptions<DataRetentionOptions> optionsAccessor,
+    RetentionCleanupState state,
     ILogger<RetentionCleanupWorker> logger) : BackgroundService
 {
     private readonly DataRetentionOptions _options = optionsAccessor.Value;
@@ -41,6 +42,7 @@ public sealed class RetentionCleanupWorker(
                 TimeSpan.FromHours(Math.Max(1, _options.HeartbeatRetentionHours)),
                 TimeSpan.FromHours(Math.Max(1, _options.TelemetryRetentionHours)),
                 cancellationToken);
+            state.SetSuccess(result);
 
             var total = result.ExpiredAccountSessionsDeleted +
                         result.ExpiredJoinTokensDeleted +
@@ -66,6 +68,7 @@ public sealed class RetentionCleanupWorker(
         }
         catch (Exception ex)
         {
+            state.SetFailure(DateTimeOffset.UtcNow, $"{ex.GetType().Name}: {ex.Message}");
             logger.LogError(ex, "Retention cleanup execution failed.");
         }
     }

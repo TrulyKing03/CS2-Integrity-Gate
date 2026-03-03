@@ -297,6 +297,7 @@ System:
 - `GET /v1/policy/current`
 - `GET /v1/metrics/summary` (internal auth)
 - `POST /v1/ops/cleanup/run` (internal auth)
+- `GET /v1/ops/cleanup/status` (internal auth)
 
 Auth + Queue:
 
@@ -616,6 +617,7 @@ Reviewer workflow examples:
 ```powershell
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key system-metrics
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-cleanup
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key cleanup-status
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-bans --account $session.accountId --status active
