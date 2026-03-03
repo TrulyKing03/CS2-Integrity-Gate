@@ -58,6 +58,13 @@ public interface ISqliteStore
     Task UpsertSuspicionScoreAsync(SuspicionScoreUpdate update, CancellationToken cancellationToken);
     Task<IReadOnlyList<SuspicionScoreUpdate>> GetSuspicionScoresAsync(string matchSessionId, string accountId, CancellationToken cancellationToken);
     Task AddEnforcementActionAsync(EnforcementAction action, string detailsJson, CancellationToken cancellationToken);
+    Task<bool> HasRecentEnforcementActionAsync(
+        string matchSessionId,
+        string accountId,
+        string actionType,
+        string reasonCode,
+        int withinSeconds,
+        CancellationToken cancellationToken);
     Task<IReadOnlyList<EnforcementAction>> GetEnforcementActionsAsync(string matchSessionId, CancellationToken cancellationToken);
     Task<IReadOnlyList<EnforcementAction>> GetPendingEnforcementActionsAsync(string matchSessionId, string? accountId, CancellationToken cancellationToken);
     Task<bool> AcknowledgeEnforcementActionAsync(EnforcementActionAckRequest request, CancellationToken cancellationToken);
@@ -862,6 +869,38 @@ public sealed class SqliteStore : ISqliteStore
         cmd.Parameters.AddWithValue("$created_at", action.CreatedAtUtc.ToString("O"));
         cmd.Parameters.AddWithValue("$details_json", detailsJson);
         await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<bool> HasRecentEnforcementActionAsync(
+        string matchSessionId,
+        string accountId,
+        string actionType,
+        string reasonCode,
+        int withinSeconds,
+        CancellationToken cancellationToken)
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddSeconds(-Math.Max(1, withinSeconds)).ToString("O");
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT 1
+            FROM enforcement_actions
+            WHERE match_session_id = $match_session_id
+              AND account_id = $account_id
+              AND action_type = $action_type
+              AND reason_code = $reason_code
+              AND created_at_utc >= $cutoff_utc
+            ORDER BY created_at_utc DESC
+            LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("$match_session_id", matchSessionId);
+        cmd.Parameters.AddWithValue("$account_id", accountId);
+        cmd.Parameters.AddWithValue("$action_type", actionType);
+        cmd.Parameters.AddWithValue("$reason_code", reasonCode);
+        cmd.Parameters.AddWithValue("$cutoff_utc", cutoff);
+        var exists = await cmd.ExecuteScalarAsync(cancellationToken);
+        return exists is not null && exists != DBNull.Value;
     }
 
     public async Task<IReadOnlyList<EnforcementAction>> GetEnforcementActionsAsync(

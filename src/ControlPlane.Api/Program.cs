@@ -494,6 +494,7 @@ app.MapPost("/v1/telemetry/ticks", async (
     ISqliteStore store,
     IDetectionEngine detectionEngine,
     IEvidenceService evidenceService,
+    IOptions<AcPolicyOptions> policyOptions,
     IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
@@ -512,7 +513,14 @@ app.MapPost("/v1/telemetry/ticks", async (
         cancellationToken);
 
     var result = detectionEngine.ProcessTicks(envelope);
-    await PersistDetectionResultAsync(result, envelope.MatchSessionId, store, evidenceService, cancellationToken);
+    var actionDedupSec = Math.Max(1, policyOptions.Value.Detection.ActionCooldownSec);
+    await PersistDetectionResultAsync(
+        result,
+        envelope.MatchSessionId,
+        actionDedupSec,
+        store,
+        evidenceService,
+        cancellationToken);
     return Results.Ok(new { ingested = envelope.Items.Count, scores = result.ScoreUpdates.Count, actions = result.EnforcementActions.Count });
 });
 
@@ -522,6 +530,7 @@ app.MapPost("/v1/telemetry/shots", async (
     ISqliteStore store,
     IDetectionEngine detectionEngine,
     IEvidenceService evidenceService,
+    IOptions<AcPolicyOptions> policyOptions,
     IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
@@ -540,7 +549,14 @@ app.MapPost("/v1/telemetry/shots", async (
         cancellationToken);
 
     var result = detectionEngine.ProcessShots(envelope);
-    await PersistDetectionResultAsync(result, envelope.MatchSessionId, store, evidenceService, cancellationToken);
+    var actionDedupSec = Math.Max(1, policyOptions.Value.Detection.ActionCooldownSec);
+    await PersistDetectionResultAsync(
+        result,
+        envelope.MatchSessionId,
+        actionDedupSec,
+        store,
+        evidenceService,
+        cancellationToken);
     return Results.Ok(new { ingested = envelope.Items.Count, scores = result.ScoreUpdates.Count, actions = result.EnforcementActions.Count });
 });
 
@@ -550,6 +566,7 @@ app.MapPost("/v1/telemetry/los", async (
     ISqliteStore store,
     IDetectionEngine detectionEngine,
     IEvidenceService evidenceService,
+    IOptions<AcPolicyOptions> policyOptions,
     IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
@@ -568,7 +585,14 @@ app.MapPost("/v1/telemetry/los", async (
         cancellationToken);
 
     var result = detectionEngine.ProcessLosSamples(envelope);
-    await PersistDetectionResultAsync(result, envelope.MatchSessionId, store, evidenceService, cancellationToken);
+    var actionDedupSec = Math.Max(1, policyOptions.Value.Detection.ActionCooldownSec);
+    await PersistDetectionResultAsync(
+        result,
+        envelope.MatchSessionId,
+        actionDedupSec,
+        store,
+        evidenceService,
+        cancellationToken);
     return Results.Ok(new { ingested = envelope.Items.Count });
 });
 
@@ -856,6 +880,7 @@ app.Run();
 static async Task PersistDetectionResultAsync(
     DetectionResult result,
     string matchSessionId,
+    int actionDedupSec,
     ISqliteStore store,
     IEvidenceService evidenceService,
     CancellationToken cancellationToken)
@@ -867,6 +892,18 @@ static async Task PersistDetectionResultAsync(
 
     foreach (var action in result.EnforcementActions)
     {
+        var alreadyQueued = await store.HasRecentEnforcementActionAsync(
+            action.MatchSessionId,
+            action.AccountId,
+            action.ActionType,
+            action.ReasonCode,
+            actionDedupSec,
+            cancellationToken);
+        if (alreadyQueued)
+        {
+            continue;
+        }
+
         await store.AddEnforcementActionAsync(
             action,
             $$"""

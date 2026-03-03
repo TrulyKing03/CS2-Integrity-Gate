@@ -179,6 +179,7 @@ Notable behaviors:
 - Replay attempt returns `token_replayed`.
 - Heartbeat freshness is enforced using configured grace window.
 - Policy is config-driven for token TTL and heartbeat cadence.
+- Enforcement actions are de-duplicated server-side within policy cooldown windows to reduce duplicate kicks/evidence churn.
 
 ## `AcClient.Service`
 
