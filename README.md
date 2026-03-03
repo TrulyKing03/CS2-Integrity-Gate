@@ -550,6 +550,7 @@ Scenario runner (single entrypoint for scripted flows):
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario smoke -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario gateway -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario queue-auth -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario retention -SettingsPath ops/stack.settings.sample.json
 ```
 
 Local stack manager:
@@ -645,6 +646,7 @@ Plugin gateway helper script:
 powershell -ExecutionPolicy Bypass -File scripts/run-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1
 ```
 
 `smoke-plugin-gateway.ps1` verifies connect flow, telemetry ingestion, host-action consume, and gateway metrics endpoints.
@@ -661,6 +663,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1
 6. Run `scripts/qa-run.ps1 -Fast` before merge.
 7. Run `scripts/smoke-plugin-gateway.ps1` before plugin host integration changes.
 8. Run `scripts/smoke-queue-auth.ps1` when changing auth/queue flow.
+9. Run `scripts/smoke-retention-status.ps1` when changing cleanup/ops behavior.
 
 ## Reset local state
 
@@ -815,6 +818,7 @@ No telemetry actions generated:
 |   |-- smoke-test.ps1
 |   |-- smoke-plugin-gateway.ps1
 |   |-- smoke-queue-auth.ps1
+|   |-- smoke-retention-status.ps1
 |   |-- smoke-ban-lifecycle.ps1
 |   `-- reviewer-demo.ps1
 |-- tools

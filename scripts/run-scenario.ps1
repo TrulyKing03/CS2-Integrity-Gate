@@ -46,12 +46,16 @@ switch ($Scenario.ToLowerInvariant()) {
         powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1 -Backend $backend
         break
     }
+    "retention" {
+        powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1 -Backend $backend
+        break
+    }
     "qa-full" {
         powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Backend $backend
         break
     }
     default {
-        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|gateway|queue-auth|qa-fast|qa-full)"
+        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|gateway|queue-auth|retention|qa-fast|qa-full)"
     }
 }
 
