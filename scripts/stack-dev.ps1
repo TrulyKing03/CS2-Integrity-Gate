@@ -3,12 +3,39 @@ param(
     [string]$Action = "status",
     [string]$Backend = "http://localhost:5042",
     [string]$RuntimeDir = "runtime",
-    [switch]$IncludeGateway
+    [switch]$IncludeGateway,
+    [string]$SettingsPath = "",
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
+
+if (-not [string]::IsNullOrWhiteSpace($SettingsPath)) {
+    $settingsAbsolute = if ([System.IO.Path]::IsPathRooted($SettingsPath)) { $SettingsPath } else { Join-Path $repo $SettingsPath }
+    if (-not (Test-Path $settingsAbsolute)) {
+        throw "Settings file not found: $settingsAbsolute"
+    }
+
+    $settings = Get-Content $settingsAbsolute | ConvertFrom-Json
+    if ($settings.backendBaseUrl) {
+        $Backend = $settings.backendBaseUrl
+    }
+
+    if ($settings.serverApiKey) {
+        $env:CS2IG_SERVER_API_KEY = $settings.serverApiKey
+    }
+    if ($settings.internalApiKey) {
+        $env:CS2IG_INTERNAL_API_KEY = $settings.internalApiKey
+    }
+    if ($settings.bridgeApiKey) {
+        $env:CS2IG_BRIDGE_API_KEY = $settings.bridgeApiKey
+    }
+    if ($settings.runtimeSigningKey) {
+        $env:CS2IG_RUNTIME_SIGNING_KEY = $settings.runtimeSigningKey
+    }
+}
 
 $runtimeAbsolute = if ([System.IO.Path]::IsPathRooted($RuntimeDir)) { $RuntimeDir } else { Join-Path $repo $RuntimeDir }
 $pidsDir = Join-Path $runtimeAbsolute "pids"
@@ -123,10 +150,18 @@ Ensure-Dirs
 
 switch ($Action) {
     "start" {
-        Start-ServiceProcess -Name "controlplane" -PidFile $apiPidFile -LogFile $apiLogFile -ArgumentList @("run", "--project", "src/ControlPlane.Api", "--urls", $Backend)
-        Start-ServiceProcess -Name "acclient" -PidFile $acPidFile -LogFile $acLogFile -ArgumentList @("run", "--project", "src/AcClient.Service")
+        if (-not $SkipBuild) {
+            Write-Host "[stack] building solution..."
+            dotnet build Cs2AcStack.slnx
+            if ($LASTEXITCODE -ne 0) {
+                throw "stack build failed (exit=$LASTEXITCODE)"
+            }
+        }
+
+        Start-ServiceProcess -Name "controlplane" -PidFile $apiPidFile -LogFile $apiLogFile -ArgumentList @("run", "--no-build", "--project", "src/ControlPlane.Api", "--urls", $Backend)
+        Start-ServiceProcess -Name "acclient" -PidFile $acPidFile -LogFile $acLogFile -ArgumentList @("run", "--no-build", "--project", "src/AcClient.Service")
         if ($IncludeGateway) {
-            Start-ServiceProcess -Name "plugingateway" -PidFile $gatewayPidFile -LogFile $gatewayLogFile -ArgumentList @("run", "--project", "tools/adapters/PluginBridge.Gateway", "--", "Gateway:BackendBaseUrl=$Backend")
+            Start-ServiceProcess -Name "plugingateway" -PidFile $gatewayPidFile -LogFile $gatewayLogFile -ArgumentList @("run", "--no-build", "--project", "tools/adapters/PluginBridge.Gateway", "--", "Gateway:BackendBaseUrl=$Backend")
         }
         break
     }
@@ -147,9 +182,9 @@ switch ($Action) {
         break
     }
     "restart" {
-        & $PSCommandPath -Action stop -Backend $Backend -RuntimeDir $RuntimeDir -IncludeGateway:$IncludeGateway
+        & $PSCommandPath -Action stop -Backend $Backend -RuntimeDir $RuntimeDir -IncludeGateway:$IncludeGateway -SettingsPath $SettingsPath -SkipBuild:$SkipBuild
         Start-Sleep -Seconds 1
-        & $PSCommandPath -Action start -Backend $Backend -RuntimeDir $RuntimeDir -IncludeGateway:$IncludeGateway
+        & $PSCommandPath -Action start -Backend $Backend -RuntimeDir $RuntimeDir -IncludeGateway:$IncludeGateway -SettingsPath $SettingsPath -SkipBuild:$SkipBuild
         break
     }
 }

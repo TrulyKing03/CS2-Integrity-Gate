@@ -558,6 +558,8 @@ powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action start
 powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action status
 powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action stop
 powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action start -IncludeGateway
+powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action start -IncludeGateway -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action restart -IncludeGateway -SettingsPath ops/stack.settings.sample.json -SkipBuild
 ```
 
 Reviewer end-to-end demo:
