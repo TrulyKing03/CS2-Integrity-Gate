@@ -5,6 +5,7 @@ param(
     [string]$Backend = "http://localhost:5042",
     [string]$Account = "acc_local_demo",
     [string]$Steam = "76561190000000001",
+    [string]$AccessToken = "",
     [switch]$SelfValidate,
     [string]$RuntimeSigningKey = ""
 )
@@ -27,6 +28,10 @@ else {
         "--steam", $Steam,
         "--keep-runtime"
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
+        $args += @("--access-token", $AccessToken)
+    }
 
     if ($SelfValidate) {
         $args += "--self-validate"

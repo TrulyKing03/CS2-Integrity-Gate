@@ -10,6 +10,18 @@ public interface ISqliteStore
 {
     Task InitializeAsync(CancellationToken cancellationToken);
     Task EnsureAccountAsync(string accountId, string steamId, CancellationToken cancellationToken);
+    Task UpsertAccountSessionAsync(
+        string sessionId,
+        string accountId,
+        string tokenHash,
+        DateTimeOffset issuedAtUtc,
+        DateTimeOffset expiresAtUtc,
+        CancellationToken cancellationToken);
+    Task<bool> IsValidAccountSessionAsync(
+        string tokenHash,
+        string accountId,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken);
     Task UpsertDeviceAsync(
         string deviceId,
         string accountId,
@@ -156,6 +168,17 @@ public sealed class SqliteStore : ISqliteStore
                 steam_id TEXT NOT NULL UNIQUE,
                 linked_at_utc TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS account_sessions (
+                session_id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                issued_at_utc TEXT NOT NULL,
+                expires_at_utc TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_account_sessions_account_expires
+                ON account_sessions (account_id, expires_at_utc);
 
             CREATE TABLE IF NOT EXISTS devices (
                 device_id TEXT PRIMARY KEY,
@@ -407,6 +430,61 @@ public sealed class SqliteStore : ISqliteStore
         cmd.Parameters.AddWithValue("$status", status);
         cmd.Parameters.AddWithValue("$last_seen", now.ToString("O"));
         await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task UpsertAccountSessionAsync(
+        string sessionId,
+        string accountId,
+        string tokenHash,
+        DateTimeOffset issuedAtUtc,
+        DateTimeOffset expiresAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO account_sessions (
+                session_id, account_id, token_hash, issued_at_utc, expires_at_utc
+            )
+            VALUES (
+                $session_id, $account_id, $token_hash, $issued_at_utc, $expires_at_utc
+            )
+            ON CONFLICT(token_hash) DO UPDATE SET
+                account_id = excluded.account_id,
+                issued_at_utc = excluded.issued_at_utc,
+                expires_at_utc = excluded.expires_at_utc;
+            """;
+        cmd.Parameters.AddWithValue("$session_id", sessionId);
+        cmd.Parameters.AddWithValue("$account_id", accountId);
+        cmd.Parameters.AddWithValue("$token_hash", tokenHash);
+        cmd.Parameters.AddWithValue("$issued_at_utc", issuedAtUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("$expires_at_utc", expiresAtUtc.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<bool> IsValidAccountSessionAsync(
+        string tokenHash,
+        string accountId,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT 1
+            FROM account_sessions
+            WHERE token_hash = $token_hash
+              AND account_id = $account_id
+              AND expires_at_utc > $now_utc
+            LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("$token_hash", tokenHash);
+        cmd.Parameters.AddWithValue("$account_id", accountId);
+        cmd.Parameters.AddWithValue("$now_utc", nowUtc.ToString("O"));
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return result is not null && result != DBNull.Value;
     }
 
     public async Task<bool> IsDeviceBoundToAccountAsync(

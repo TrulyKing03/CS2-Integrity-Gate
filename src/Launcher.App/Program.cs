@@ -61,7 +61,7 @@ static async Task RunPlayAsync(
 {
     var identity = await ResolveIdentityAsync(http, options, jsonOptions);
     var queueRequest = new QueueRequest(identity.AccountId, identity.SteamId, options.QueueType);
-    var queueResponseHttp = await http.PostAsJsonAsync("v1/queue/enqueue", queueRequest, jsonOptions);
+    var queueResponseHttp = await SendQueueRequestAsync(http, queueRequest, identity.AccessToken, jsonOptions);
     var queue = await ReadSuccessOrThrowAsync<QueueResponse>(queueResponseHttp, jsonOptions, "queue");
 
     var session = new QueueSessionState(
@@ -352,7 +352,7 @@ static void DeleteFileIfExists(string path)
     }
 }
 
-static async Task<(string AccountId, string SteamId)> ResolveIdentityAsync(
+static async Task<ResolvedIdentity> ResolveIdentityAsync(
     HttpClient http,
     LauncherOptions options,
     JsonSerializerOptions jsonOptions)
@@ -361,7 +361,7 @@ static async Task<(string AccountId, string SteamId)> ResolveIdentityAsync(
     var steamId = options.SteamId;
     if (!string.IsNullOrWhiteSpace(accountId) && !string.IsNullOrWhiteSpace(steamId))
     {
-        return (accountId, steamId);
+        return new ResolvedIdentity(accountId, steamId, options.AccessToken);
     }
 
     var loginRequest = new LoginRequest(
@@ -371,10 +371,29 @@ static async Task<(string AccountId, string SteamId)> ResolveIdentityAsync(
     var login = await ReadSuccessOrThrowAsync<LoginResponse>(loginResponse, jsonOptions, "login");
     if (!string.IsNullOrWhiteSpace(options.SteamId))
     {
-        return (login.AccountId, options.SteamId);
+        return new ResolvedIdentity(login.AccountId, options.SteamId, options.AccessToken ?? login.AccessToken);
     }
 
-    return (login.AccountId, login.SteamId);
+    return new ResolvedIdentity(login.AccountId, login.SteamId, options.AccessToken ?? login.AccessToken);
+}
+
+static Task<HttpResponseMessage> SendQueueRequestAsync(
+    HttpClient http,
+    QueueRequest request,
+    string? accessToken,
+    JsonSerializerOptions jsonOptions)
+{
+    if (string.IsNullOrWhiteSpace(accessToken))
+    {
+        return http.PostAsJsonAsync("v1/queue/enqueue", request, jsonOptions);
+    }
+
+    var message = new HttpRequestMessage(HttpMethod.Post, "v1/queue/enqueue")
+    {
+        Content = JsonContent.Create(request, options: jsonOptions)
+    };
+    message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+    return http.SendAsync(message);
 }
 
 static bool TryReadJson<T>(
@@ -508,6 +527,7 @@ static void PrintUsage()
       --runtime <dir>
       --account <id>
       --steam <id>
+      --access-token <token>
       --queue <high_trust|standard>
       --token-wait-sec <n>
       --cs2-path <path>
@@ -532,6 +552,11 @@ internal sealed record RuntimeSignatureFile(
     string Signature,
     DateTimeOffset CreatedAtUtc);
 
+internal sealed record ResolvedIdentity(
+    string AccountId,
+    string SteamId,
+    string? AccessToken);
+
 internal sealed class LauncherOptions
 {
     public string Command { get; private set; } = "play";
@@ -545,6 +570,7 @@ internal sealed class LauncherOptions
     public string Password { get; private set; } = "password";
     public string AccountId { get; private set; } = string.Empty;
     public string SteamId { get; private set; } = string.Empty;
+    public string AccessToken { get; private set; } = string.Empty;
     public int TokenWaitSec { get; private set; } = 90;
     public bool DryRun { get; private set; } = true;
     public bool KeepRuntimeFiles { get; private set; }
@@ -617,6 +643,9 @@ internal sealed class LauncherOptions
                     break;
                 case "--steam":
                     options.SteamId = ReadValue(args, ++i, "--steam");
+                    break;
+                case "--access-token":
+                    options.AccessToken = ReadValue(args, ++i, "--access-token");
                     break;
                 case "--token-wait-sec":
                     options.TokenWaitSec = int.Parse(ReadValue(args, ++i, "--token-wait-sec"));
@@ -700,6 +729,11 @@ internal sealed class LauncherOptions
             SteamId = profile.SteamId;
         }
 
+        if (!string.IsNullOrWhiteSpace(profile.AccessToken))
+        {
+            AccessToken = profile.AccessToken;
+        }
+
         if (profile.TokenWaitSec is > 0)
         {
             TokenWaitSec = profile.TokenWaitSec.Value;
@@ -753,6 +787,7 @@ internal sealed class LauncherProfile
     public string? Password { get; set; }
     public string? AccountId { get; set; }
     public string? SteamId { get; set; }
+    public string? AccessToken { get; set; }
     public int? TokenWaitSec { get; set; }
     public bool? DryRun { get; set; }
     public bool? KeepRuntimeFiles { get; set; }

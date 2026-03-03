@@ -115,6 +115,7 @@ app.MapGet("/v1/metrics/summary", async (
 app.MapPost("/v1/auth/login", async (
     LoginRequest request,
     ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(request.Username))
@@ -126,21 +127,54 @@ app.MapPost("/v1/auth/login", async (
     var steamId = CreateSteamId(request.Username);
     await store.EnsureAccountAsync(accountId, steamId, cancellationToken);
 
+    var issuedAt = DateTimeOffset.UtcNow;
+    var accessToken = AccessToken();
+    var tokenHash = HashAccessToken(accessToken);
+    await store.UpsertAccountSessionAsync(
+        sessionId: $"as_{Guid.NewGuid():N}",
+        accountId,
+        tokenHash,
+        issuedAt,
+        issuedAt.AddMinutes(Math.Max(1, apiAuthOptions.Value.AccessTokenTtlMinutes)),
+        cancellationToken);
+
     return Results.Ok(new LoginResponse(
         accountId,
-        AccessToken(),
+        accessToken,
         steamId,
         SteamLinked: true));
 });
 
 app.MapPost("/v1/queue/enqueue", async (
     QueueRequest request,
+    HttpContext context,
     ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
     CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(request.AccountId) || string.IsNullOrWhiteSpace(request.SteamId))
     {
         return Results.BadRequest(new { error = "account_and_steam_required" });
+    }
+
+    var token = TryReadBearerToken(context);
+    if (apiAuthOptions.Value.RequireQueueAccessToken || !string.IsNullOrWhiteSpace(token))
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return Results.Unauthorized();
+        }
+
+        var tokenHash = HashAccessToken(token);
+        var valid = await store.IsValidAccountSessionAsync(
+            tokenHash,
+            request.AccountId,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        if (!valid)
+        {
+            return Results.Unauthorized();
+        }
     }
 
     await store.EnsureAccountAsync(request.AccountId, request.SteamId, cancellationToken);
@@ -938,6 +972,8 @@ static string CreateSteamId(string username)
 }
 
 static string AccessToken() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+static string HashAccessToken(string token) =>
+    Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 
 static string MatchSessionId() => $"ms_{Guid.NewGuid():N}";
 static string ServerId() => $"srv_eu_{Random.Shared.Next(1, 16):00}";
@@ -1020,6 +1056,28 @@ static string ReadHeaderOrFallback(HttpContext context, string headerName)
 static string ReadRemoteAddress(HttpContext context)
 {
     return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+}
+
+static string? TryReadBearerToken(HttpContext context)
+{
+    if (!context.Request.Headers.TryGetValue("Authorization", out var headerValues))
+    {
+        return null;
+    }
+
+    var value = headerValues.ToString();
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    const string prefix = "Bearer ";
+    if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+    {
+        return null;
+    }
+
+    return value[prefix.Length..].Trim();
 }
 
 static IResult? EnsureServerAuthorized(HttpContext context, ApiAuthOptions options)

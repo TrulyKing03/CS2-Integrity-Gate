@@ -8,6 +8,7 @@
   "password": "password",
   "accountId": "acc_profile_local",
   "steamId": "76561190000000001",
+  "accessToken": "",
   "tokenWaitSec": 90,
   "dryRun": true,
   "keepRuntimeFiles": true,
