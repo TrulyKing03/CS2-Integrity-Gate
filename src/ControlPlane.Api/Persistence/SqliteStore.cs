@@ -22,6 +22,8 @@ public interface ISqliteStore
         string accountId,
         DateTimeOffset nowUtc,
         CancellationToken cancellationToken);
+    Task<int> RevokeAccountSessionByTokenHashAsync(string tokenHash, CancellationToken cancellationToken);
+    Task<int> RevokeAccountSessionsByAccountAsync(string accountId, CancellationToken cancellationToken);
     Task UpsertDeviceAsync(
         string deviceId,
         string accountId,
@@ -537,6 +539,32 @@ public sealed class SqliteStore : ISqliteStore
         cmd.Parameters.AddWithValue("$now_utc", nowUtc.ToString("O"));
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is not null && result != DBNull.Value;
+    }
+
+    public async Task<int> RevokeAccountSessionByTokenHashAsync(string tokenHash, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM account_sessions
+            WHERE token_hash = $token_hash;
+            """;
+        cmd.Parameters.AddWithValue("$token_hash", tokenHash);
+        return await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<int> RevokeAccountSessionsByAccountAsync(string accountId, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM account_sessions
+            WHERE account_id = $account_id;
+            """;
+        cmd.Parameters.AddWithValue("$account_id", accountId);
+        return await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> IsDeviceBoundToAccountAsync(

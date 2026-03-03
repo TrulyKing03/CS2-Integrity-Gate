@@ -33,6 +33,16 @@ switch (options.Command)
         Print(status, json);
         break;
     }
+    case "revoke-sessions":
+    {
+        var request = new RevokeAccountSessionsRequest(
+            AccountId: options.Require("--account", options.AccountId),
+            Reason: options.ReasonCode ?? "manual_revoke",
+            RequestedBy: options.RequestedBy ?? "reviewer_console");
+        var response = await http.PostAsJsonAsync("v1/ops/auth/sessions/revoke", request, json);
+        await EnsureAndPrintAsync(response, json);
+        break;
+    }
     case "list-security-events":
     {
         var route = "v1/ops/security/events";
@@ -239,6 +249,7 @@ static void PrintUsage()
       system-metrics
       run-cleanup
       cleanup-status
+      revoke-sessions --account <id> [--reason <code>] [--by <actor>]
       list-security-events [--since-minutes <n>] [--severity low|medium|high] [--event <type>] [--limit <n>]
       security-summary [--since-minutes <n>]
       list-evidence [--match <id>] [--account <id>]

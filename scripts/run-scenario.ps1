@@ -58,12 +58,16 @@ switch ($Scenario.ToLowerInvariant()) {
         powershell -ExecutionPolicy Bypass -File scripts/smoke-security-events.ps1 -Backend $backend
         break
     }
+    "session-revoke" {
+        powershell -ExecutionPolicy Bypass -File scripts/smoke-session-revoke.ps1 -Backend $backend
+        break
+    }
     "qa-full" {
         powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Backend $backend
         break
     }
     default {
-        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|gateway|queue-auth|retention|policy-hash|security-events|qa-fast|qa-full)"
+        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|gateway|queue-auth|retention|policy-hash|security-events|session-revoke|qa-fast|qa-full)"
     }
 }
 

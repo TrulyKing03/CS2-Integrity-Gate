@@ -278,6 +278,7 @@ Main capabilities:
 - Internal moderation CLI with `X-Internal-Api-Key` auth.
 - System summary metrics view for quick operational checks.
 - Security-event listing and aggregate summaries for incident triage.
+- Account session revocation tooling for compromised-token response.
 - Evidence listing and lookup.
 - Review-case creation and status updates.
 - Ban creation/listing/status updates and appeal lifecycle handling.
@@ -304,10 +305,12 @@ System:
 - `GET /v1/ops/cleanup/status` (internal auth)
 - `GET /v1/ops/security/events` (internal auth)
 - `GET /v1/ops/security/summary` (internal auth)
+- `POST /v1/ops/auth/sessions/revoke` (internal auth)
 
 Auth + Queue:
 
 - `POST /v1/auth/login`
+- `POST /v1/auth/logout`
 - `POST /v1/queue/enqueue`
 
 Attestation:
@@ -568,6 +571,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario queu
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario retention -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario policy-hash -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-events -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario session-revoke -SettingsPath ops/stack.settings.sample.json
 ```
 
 Local stack manager:
@@ -636,6 +640,7 @@ Reviewer workflow examples:
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key system-metrics
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-cleanup
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key cleanup-status
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key revoke-sessions --account $session.accountId --reason security_response --by ops
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key security-summary --since-minutes 60
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-security-events --since-minutes 60 --limit 50
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
@@ -665,6 +670,7 @@ Plugin gateway helper script:
 powershell -ExecutionPolicy Bypass -File scripts/run-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-session-revoke.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-policy-hash.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-security-events.ps1
@@ -684,9 +690,10 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-security-events.ps1
 6. Run `scripts/qa-run.ps1 -Fast` before merge.
 7. Run `scripts/smoke-plugin-gateway.ps1` before plugin host integration changes.
 8. Run `scripts/smoke-queue-auth.ps1` when changing auth/queue flow.
-9. Run `scripts/smoke-retention-status.ps1` when changing cleanup/ops behavior.
-10. Run `scripts/smoke-policy-hash.ps1` when changing AC policy enforcement.
-11. Run `scripts/smoke-security-events.ps1` when changing auth/rate-limit/ops auditing paths.
+9. Run `scripts/smoke-session-revoke.ps1` when changing auth session/logout behavior.
+10. Run `scripts/smoke-retention-status.ps1` when changing cleanup/ops behavior.
+11. Run `scripts/smoke-policy-hash.ps1` when changing AC policy enforcement.
+12. Run `scripts/smoke-security-events.ps1` when changing auth/rate-limit/ops auditing paths.
 
 ## Reset local state
 
@@ -766,6 +773,7 @@ For real AC integration:
 - Enable `ApiAuth.RequireQueueAccessToken` outside local dev to bind enqueue requests to authenticated accounts.
 - Do not trust client-only detections for irreversible actions.
 - Keep token TTL short.
+- Revoke access tokens promptly (`/v1/auth/logout` and `/v1/ops/auth/sessions/revoke`) when compromise is suspected.
 - Reject match start/heartbeat when device identity is not enrolled for the account + steam pair.
 - Enforce single-use token semantics.
 - Separate behavior-based signals from high-confidence integrity/rules.
@@ -846,6 +854,7 @@ No telemetry actions generated:
 |   |-- smoke-test.ps1
 |   |-- smoke-plugin-gateway.ps1
 |   |-- smoke-queue-auth.ps1
+|   |-- smoke-session-revoke.ps1
 |   |-- smoke-retention-status.ps1
 |   |-- smoke-policy-hash.ps1
 |   |-- smoke-security-events.ps1
@@ -878,6 +887,7 @@ Current scope:
 - Local plugin HTTP gateway for runtime integration.
 - Ban-aware queue/join/heartbeat gating.
 - Security-event audit logging and ops query endpoints.
+- Access-token logout and internal account-session revocation workflow.
 - Evidence, review, ban, and appeal workflow APIs.
 - Offline threshold report generation for detector tuning.
 - SQLite-backed persistence.

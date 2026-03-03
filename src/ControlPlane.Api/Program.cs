@@ -256,6 +256,50 @@ app.MapGet("/v1/ops/security/summary", async (
     return Results.Ok(summary);
 });
 
+app.MapPost("/v1/ops/auth/sessions/revoke", async (
+    RevokeAccountSessionsRequest request,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    if (string.IsNullOrWhiteSpace(request.AccountId))
+    {
+        return Results.BadRequest(new { error = "account_id_required" });
+    }
+
+    var revokedAtUtc = DateTimeOffset.UtcNow;
+    var revokedCount = await store.RevokeAccountSessionsByAccountAsync(request.AccountId.Trim(), cancellationToken);
+    await TryWriteSecurityEventAsync(
+        store,
+        eventType: "account_sessions_revoked",
+        severity: "medium",
+        source: "ops.auth.sessions.revoke",
+        accountId: request.AccountId,
+        matchSessionId: null,
+        ipAddress: ReadRemoteAddress(context),
+        details: new
+        {
+            revokedCount,
+            reason = string.IsNullOrWhiteSpace(request.Reason) ? "manual_revoke" : request.Reason,
+            requestedBy = request.RequestedBy
+        },
+        cancellationToken);
+
+    return Results.Ok(new RevokeAccountSessionsResponse(
+        AccountId: request.AccountId.Trim(),
+        RevokedCount: revokedCount,
+        Reason: string.IsNullOrWhiteSpace(request.Reason) ? "manual_revoke" : request.Reason,
+        RequestedBy: string.IsNullOrWhiteSpace(request.RequestedBy) ? "internal_api" : request.RequestedBy,
+        RevokedAtUtc: revokedAtUtc));
+});
+
 app.MapPost("/v1/auth/login", async (
     LoginRequest request,
     ISqliteStore store,
@@ -287,6 +331,36 @@ app.MapPost("/v1/auth/login", async (
         accessToken,
         steamId,
         SteamLinked: true));
+});
+
+app.MapPost("/v1/auth/logout", async (
+    HttpContext context,
+    ISqliteStore store,
+    CancellationToken cancellationToken) =>
+{
+    var token = TryReadBearerToken(context);
+    if (string.IsNullOrWhiteSpace(token))
+    {
+        return Results.Unauthorized();
+    }
+
+    var revokedAtUtc = DateTimeOffset.UtcNow;
+    var tokenHash = HashAccessToken(token);
+    var revokedCount = await store.RevokeAccountSessionByTokenHashAsync(tokenHash, cancellationToken);
+    await TryWriteSecurityEventAsync(
+        store,
+        eventType: revokedCount > 0 ? "session_logout" : "session_logout_token_not_found",
+        severity: revokedCount > 0 ? "low" : "medium",
+        source: "auth.logout",
+        accountId: null,
+        matchSessionId: null,
+        ipAddress: ReadRemoteAddress(context),
+        details: new { revokedCount },
+        cancellationToken);
+
+    return Results.Ok(new LogoutResponse(
+        Revoked: revokedCount > 0,
+        RevokedAtUtc: revokedAtUtc));
 });
 
 app.MapPost("/v1/queue/enqueue", async (

@@ -4,6 +4,17 @@ public sealed record LoginRequest(string Username, string Password);
 
 public sealed record LoginResponse(string AccountId, string AccessToken, string SteamId, bool SteamLinked);
 
+public sealed record LogoutResponse(bool Revoked, DateTimeOffset RevokedAtUtc);
+
+public sealed record RevokeAccountSessionsRequest(string AccountId, string Reason, string RequestedBy);
+
+public sealed record RevokeAccountSessionsResponse(
+    string AccountId,
+    int RevokedCount,
+    string Reason,
+    string RequestedBy,
+    DateTimeOffset RevokedAtUtc);
+
 public sealed record QueueRequest(string AccountId, string SteamId, string QueueType);
 
 public sealed record QueueResponse(
