@@ -1,5 +1,6 @@
 using Cs2.Plugin.CounterStrikeSharp;
 using Shared.Contracts;
+using System.Text.Json;
 
 var options = AgentOptions.Parse(args);
 var hostBridge = new DemoHostBridge();
@@ -155,6 +156,7 @@ internal sealed class DemoHostBridge : IPluginHostBridge
 
 internal sealed class AgentOptions
 {
+    public string? ProfilePath { get; private set; }
     public string BackendBaseUrl { get; private set; } = "http://localhost:5042";
     public string MatchSessionId { get; private set; } = string.Empty;
     public string ServerId { get; private set; } = string.Empty;
@@ -181,9 +183,32 @@ internal sealed class AgentOptions
         var options = new AgentOptions();
         for (var i = 0; i < args.Length; i++)
         {
+            if (!string.Equals(args[i], "--profile", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            options.ProfilePath = ReadValue(args, ++i, "--profile");
+            var profilePath = Path.GetFullPath(options.ProfilePath);
+            if (!File.Exists(profilePath))
+            {
+                throw new FileNotFoundException("ServerBridge profile file not found.", profilePath);
+            }
+
+            var profileContent = File.ReadAllText(profilePath);
+            var profile = JsonSerializer.Deserialize<AgentProfile>(profileContent, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                ?? throw new InvalidOperationException($"ServerBridge profile parse failed: {profilePath}");
+            options.ApplyProfile(profile);
+        }
+
+        for (var i = 0; i < args.Length; i++)
+        {
             var arg = args[i];
             switch (arg)
             {
+                case "--profile":
+                    i++;
+                    break;
                 case "--backend":
                     options.BackendBaseUrl = ReadValue(args, ++i, "--backend");
                     break;
@@ -241,6 +266,79 @@ internal sealed class AgentOptions
         return options;
     }
 
+    private void ApplyProfile(AgentProfile profile)
+    {
+        if (!string.IsNullOrWhiteSpace(profile.BackendBaseUrl))
+        {
+            BackendBaseUrl = profile.BackendBaseUrl;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.ServerApiKey))
+        {
+            ServerApiKey = profile.ServerApiKey;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.ExecutorId))
+        {
+            ExecutorId = profile.ExecutorId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.TargetAccountId))
+        {
+            TargetAccountId = profile.TargetAccountId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.TargetSteamId))
+        {
+            TargetSteamId = profile.TargetSteamId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.WeaponId))
+        {
+            WeaponId = profile.WeaponId;
+        }
+
+        if (profile.RuntimeSec is > 0)
+        {
+            RuntimeSec = profile.RuntimeSec.Value;
+        }
+
+        if (profile.TickIntervalSec is > 0)
+        {
+            TickIntervalSec = profile.TickIntervalSec.Value;
+        }
+
+        if (profile.MaxBatchSize is > 0)
+        {
+            MaxBatchSize = profile.MaxBatchSize.Value;
+        }
+
+        if (profile.FlushSec is > 0)
+        {
+            FlushSec = profile.FlushSec.Value;
+        }
+
+        if (profile.HealthPollSec is > 0)
+        {
+            HealthPollSec = profile.HealthPollSec.Value;
+        }
+
+        if (profile.ActionPollSec is > 0)
+        {
+            ActionPollSec = profile.ActionPollSec.Value;
+        }
+
+        if (profile.StartTick is > 0)
+        {
+            StartTick = profile.StartTick.Value;
+        }
+
+        if (profile.SimulateCheat is not null)
+        {
+            SimulateCheat = profile.SimulateCheat.Value;
+        }
+    }
+
     private static string ReadValue(string[] args, int index, string key)
     {
         if (index >= args.Length)
@@ -250,4 +348,22 @@ internal sealed class AgentOptions
 
         return args[index];
     }
+}
+
+internal sealed class AgentProfile
+{
+    public string? BackendBaseUrl { get; set; }
+    public string? ServerApiKey { get; set; }
+    public string? ExecutorId { get; set; }
+    public string? TargetAccountId { get; set; }
+    public string? TargetSteamId { get; set; }
+    public string? WeaponId { get; set; }
+    public int? RuntimeSec { get; set; }
+    public int? TickIntervalSec { get; set; }
+    public int? MaxBatchSize { get; set; }
+    public int? FlushSec { get; set; }
+    public int? HealthPollSec { get; set; }
+    public int? ActionPollSec { get; set; }
+    public long? StartTick { get; set; }
+    public bool? SimulateCheat { get; set; }
 }

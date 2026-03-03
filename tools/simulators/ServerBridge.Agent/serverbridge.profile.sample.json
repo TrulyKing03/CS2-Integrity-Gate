@@ -1,0 +1,12 @@
+{
+  "backendBaseUrl": "http://localhost:5042",
+  "serverApiKey": "dev-server-api-key",
+  "executorId": "simulator-agent",
+  "runtimeSec": 8,
+  "tickIntervalSec": 2,
+  "maxBatchSize": 64,
+  "flushSec": 3,
+  "healthPollSec": 5,
+  "actionPollSec": 3,
+  "simulateCheat": true
+}

@@ -215,6 +215,7 @@ Main capabilities:
 - Uses host-bridge callbacks for allow/deny/action handling.
 - Sends synthetic telemetry via runtime buffering and flush path.
 - Uses match worker coordinator for periodic health/action polling and acknowledgments.
+- Supports profile-based runtime settings (`tools/simulators/ServerBridge.Agent/serverbridge.profile.sample.json`).
 
 Use this as the runtime integration reference before binding to a real CS2 plugin host.
 ## `Cs2.Plugin.CounterStrikeSharp`
@@ -548,6 +549,7 @@ Terminal 4:
 $session = Get-Content runtime/session.json | ConvertFrom-Json
 $token = Get-Content runtime/join-token.json | ConvertFrom-Json
 dotnet run --project tools/simulators/ServerBridge.Agent -- --backend http://localhost:5042 --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken --simulate-cheat --runtime-sec 8
+dotnet run --project tools/simulators/ServerBridge.Agent -- --profile tools/simulators/ServerBridge.Agent/serverbridge.profile.sample.json --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken
 ```
 
 Reviewer workflow examples:
