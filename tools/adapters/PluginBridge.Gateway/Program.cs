@@ -220,6 +220,20 @@ app.MapGet("/v1/plugin/host-actions/count", (
     return Results.Ok(new { matchSessionId, accountId, count });
 });
 
+app.MapGet("/v1/plugin/metrics", (
+    HttpContext context,
+    GatewayHostBridge hostBridge,
+    IOptions<GatewayOptions> options) =>
+{
+    var authFailure = EnsureBridgeAuthorized(context, options.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    return Results.Ok(hostBridge.GetMetrics());
+});
+
 var coordinatorForShutdown = app.Services.GetRequiredService<MatchRuntimeCoordinator>();
 var runtimeForShutdown = app.Services.GetRequiredService<PluginRuntime>();
 app.Lifetime.ApplicationStopping.Register(() =>
@@ -267,12 +281,16 @@ internal sealed class GatewayOptions
     public int TelemetryFlushSec { get; set; } = 3;
     public int HealthPollSec { get; set; } = 5;
     public int ActionPollSec { get; set; } = 3;
+    public int HostActionTtlSec { get; set; } = 180;
 }
 
-internal sealed class GatewayHostBridge(ILogger<GatewayHostBridge> logger) : IPluginHostBridge
+internal sealed class GatewayHostBridge(
+    ILogger<GatewayHostBridge> logger,
+    IOptions<GatewayOptions> options) : IPluginHostBridge
 {
     private readonly ConcurrentDictionary<string, ConnectionDecisionResponse> _connectionDecisions = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, ConcurrentQueue<EnforcementAction>> _pendingActions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ConcurrentQueue<QueuedHostAction>> _pendingActions = new(StringComparer.Ordinal);
+    private readonly TimeSpan _hostActionTtl = TimeSpan.FromSeconds(Math.Max(5, options.Value.HostActionTtlSec));
 
     public void BeginConnectionDecision(PlayerConnectionAttempt attempt)
     {
@@ -291,10 +309,12 @@ internal sealed class GatewayHostBridge(ILogger<GatewayHostBridge> logger) : IPl
             return Array.Empty<EnforcementAction>();
         }
 
+        CleanupExpired(queue);
         var consumed = new List<EnforcementAction>();
-        var keep = new List<EnforcementAction>();
-        while (queue.TryDequeue(out var action))
+        var keep = new List<QueuedHostAction>();
+        while (queue.TryDequeue(out var queued))
         {
+            var action = queued.Action;
             var match = string.IsNullOrWhiteSpace(accountId) ||
                         string.Equals(action.AccountId, accountId, StringComparison.Ordinal);
             if (match)
@@ -303,13 +323,13 @@ internal sealed class GatewayHostBridge(ILogger<GatewayHostBridge> logger) : IPl
             }
             else
             {
-                keep.Add(action);
+                keep.Add(queued);
             }
         }
 
-        foreach (var action in keep)
+        foreach (var queued in keep)
         {
-            queue.Enqueue(action);
+            queue.Enqueue(queued);
         }
 
         return consumed;
@@ -322,12 +342,34 @@ internal sealed class GatewayHostBridge(ILogger<GatewayHostBridge> logger) : IPl
             return 0;
         }
 
+        CleanupExpired(queue);
         if (string.IsNullOrWhiteSpace(accountId))
         {
             return queue.Count;
         }
 
-        return queue.Count(action => string.Equals(action.AccountId, accountId, StringComparison.Ordinal));
+        return queue.Count(queued => string.Equals(queued.Action.AccountId, accountId, StringComparison.Ordinal));
+    }
+
+    public object GetMetrics()
+    {
+        var pendingPerMatch = new Dictionary<string, int>(StringComparer.Ordinal);
+        var total = 0;
+        foreach (var kvp in _pendingActions)
+        {
+            CleanupExpired(kvp.Value);
+            var count = kvp.Value.Count;
+            pendingPerMatch[kvp.Key] = count;
+            total += count;
+        }
+
+        return new
+        {
+            generatedAtUtc = DateTimeOffset.UtcNow,
+            pendingActionTotal = total,
+            pendingActionByMatch = pendingPerMatch,
+            connectionDecisionBacklog = _connectionDecisions.Count
+        };
     }
 
     public Task DenyConnectionAsync(PlayerConnectionAttempt attempt, string reason, CancellationToken cancellationToken)
@@ -348,8 +390,8 @@ internal sealed class GatewayHostBridge(ILogger<GatewayHostBridge> logger) : IPl
 
     public Task ApplyEnforcementActionAsync(EnforcementAction action, CancellationToken cancellationToken)
     {
-        var queue = _pendingActions.GetOrAdd(action.MatchSessionId, _ => new ConcurrentQueue<EnforcementAction>());
-        queue.Enqueue(action);
+        var queue = _pendingActions.GetOrAdd(action.MatchSessionId, _ => new ConcurrentQueue<QueuedHostAction>());
+        queue.Enqueue(new QueuedHostAction(action, DateTimeOffset.UtcNow));
         LogWarning(
             $"QueuedHostAction actionId={action.ActionId} match={action.MatchSessionId} account={action.AccountId} reason={action.ReasonCode}");
         _ = cancellationToken;
@@ -364,4 +406,24 @@ internal sealed class GatewayHostBridge(ILogger<GatewayHostBridge> logger) : IPl
     {
         return $"{attempt.MatchSessionId}|{attempt.AccountId}|{attempt.SteamId}|{attempt.JoinToken}";
     }
+
+    private void CleanupExpired(ConcurrentQueue<QueuedHostAction> queue)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var keep = new List<QueuedHostAction>();
+        while (queue.TryDequeue(out var queued))
+        {
+            if (now - queued.QueuedAtUtc <= _hostActionTtl)
+            {
+                keep.Add(queued);
+            }
+        }
+
+        foreach (var queued in keep)
+        {
+            queue.Enqueue(queued);
+        }
+    }
+
+    private sealed record QueuedHostAction(EnforcementAction Action, DateTimeOffset QueuedAtUtc);
 }

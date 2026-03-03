@@ -10,6 +10,7 @@ Use this when you want your CounterStrikeSharp/Metamod wrapper to send game even
 - Tracks connected/disconnected players and starts per-match health/action workers.
 - Accepts tick/shot/visibility batches and forwards telemetry through runtime buffering.
 - Queues host enforcement actions so your plugin can consume and apply them.
+- Expires stale queued host actions by configurable TTL.
 
 ## Start
 
@@ -33,6 +34,8 @@ Required header on all `/v1/plugin/*` routes:
 - `POST /v1/plugin/visibility`
 - `POST /v1/plugin/flush`
 - `POST /v1/plugin/host-actions/consume`
+- `GET /v1/plugin/host-actions/count`
+- `GET /v1/plugin/metrics`
 
 ## Example Request
 

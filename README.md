@@ -232,6 +232,7 @@ Main capabilities:
 - Exposes local HTTP endpoints your real plugin wrapper can call.
 - Uses shared runtime for join validation, telemetry buffering, health polling, and action polling.
 - Queues host actions for plugin-side consumption (`/v1/plugin/host-actions/consume`).
+- Exposes queue/health metrics for host monitoring (`/v1/plugin/metrics`).
 - Keeps CS2 host integration code thinner by centralizing backend protocol logic.
 
 Run:
