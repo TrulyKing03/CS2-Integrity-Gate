@@ -5,7 +5,8 @@ param(
     [switch]$SkipBanLifecycle,
     [switch]$SkipPluginGatewaySmoke,
     [switch]$SkipQueueAuthSmoke,
-    [switch]$SkipRetentionSmoke
+    [switch]$SkipRetentionSmoke,
+    [switch]$SkipPolicyHashSmoke
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +47,10 @@ if (-not $Fast -and -not $SkipQueueAuthSmoke) {
 
 if (-not $Fast -and -not $SkipRetentionSmoke) {
     Invoke-Step "smoke-retention-status" { powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1 -Backend $Backend }
+}
+
+if (-not $Fast -and -not $SkipPolicyHashSmoke) {
+    Invoke-Step "smoke-policy-hash" { powershell -ExecutionPolicy Bypass -File scripts/smoke-policy-hash.ps1 -Backend $Backend }
 }
 
 Invoke-Step "threshold-tuner-sanity" { powershell -ExecutionPolicy Bypass -File scripts/run-threshold-tuner.ps1 -MinSamples 1 -MinConfidence 0.1 }

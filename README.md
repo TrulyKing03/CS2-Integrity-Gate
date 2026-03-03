@@ -181,6 +181,7 @@ Notable behaviors:
 - Replay attempt returns `token_replayed`.
 - Heartbeat freshness is enforced using configured grace window.
 - Policy is config-driven for token TTL and heartbeat cadence.
+- Match-start and heartbeat can enforce AC policy-hash allow-list.
 - Enforcement actions are de-duplicated server-side within policy cooldown windows to reduce duplicate kicks/evidence churn.
 - Periodic retention cleanup removes expired account sessions/tokens and old telemetry/heartbeat records.
 
@@ -447,6 +448,8 @@ Key sections:
 - `AcPolicy.GraceWindowSec`
 - `AcPolicy.DefaultQueueTier`
 - `AcPolicy.PolicyVersion`
+- `AcPolicy.RequireAntiTamperOnMatchStart`
+- `AcPolicy.RequiredPolicyHashes`
 - `AcPolicy.RequiredTierA`
 - `AcPolicy.RequiredTierB`
 - `AcPolicy.Detection`
@@ -551,6 +554,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario smok
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario gateway -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario queue-auth -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario retention -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario policy-hash -SettingsPath ops/stack.settings.sample.json
 ```
 
 Local stack manager:
@@ -647,6 +651,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-policy-hash.ps1
 ```
 
 `smoke-plugin-gateway.ps1` verifies connect flow, telemetry ingestion, host-action consume, and gateway metrics endpoints.
@@ -664,6 +669,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1
 7. Run `scripts/smoke-plugin-gateway.ps1` before plugin host integration changes.
 8. Run `scripts/smoke-queue-auth.ps1` when changing auth/queue flow.
 9. Run `scripts/smoke-retention-status.ps1` when changing cleanup/ops behavior.
+10. Run `scripts/smoke-policy-hash.ps1` when changing AC policy enforcement.
 
 ## Reset local state
 
@@ -774,6 +780,11 @@ For real AC integration:
 - AC device enrollment does not match the current launcher session account/steam pair.
 - Restart AC service and launcher for a clean enrollment cycle, then requeue.
 
+`match-start failed: policy_hash_not_allowed`:
+
+- AC reported policy hash is not in `AcPolicy.RequiredPolicyHashes`.
+- Align `AcClient.PolicyHash` with backend policy allow-list and retry.
+
 `AC loop log shows session signature validation failed`:
 
 - `CS2IG_RUNTIME_SIGNING_KEY` values between launcher and AC do not match, or `runtime/session.sig` is stale.
@@ -819,6 +830,7 @@ No telemetry actions generated:
 |   |-- smoke-plugin-gateway.ps1
 |   |-- smoke-queue-auth.ps1
 |   |-- smoke-retention-status.ps1
+|   |-- smoke-policy-hash.ps1
 |   |-- smoke-ban-lifecycle.ps1
 |   `-- reviewer-demo.ps1
 |-- tools

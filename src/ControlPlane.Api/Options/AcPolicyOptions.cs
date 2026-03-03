@@ -10,6 +10,8 @@ public sealed class AcPolicyOptions
     public int GraceWindowSec { get; set; } = 60;
     public string DefaultQueueTier { get; set; } = "high_trust";
     public string PolicyVersion { get; set; } = "pol_local";
+    public bool RequireAntiTamperOnMatchStart { get; set; } = true;
+    public List<string> RequiredPolicyHashes { get; set; } = new();
     public PlatformTierOptions RequiredTierA { get; set; } = new();
     public PlatformTierOptions RequiredTierB { get; set; } = new();
     public DetectionThresholdOptions Detection { get; set; } = new();

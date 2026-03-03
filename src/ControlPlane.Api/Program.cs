@@ -92,6 +92,8 @@ app.MapGet("/v1/policy/current", (
         defaultQueueTier = policy.DefaultQueueTier,
         heartbeatIntervalSec = policy.HeartbeatIntervalSec,
         graceWindowSec = policy.GraceWindowSec,
+        requireAntiTamperOnMatchStart = policy.RequireAntiTamperOnMatchStart,
+        requiredPolicyHashes = policy.RequiredPolicyHashes,
         requiredTierA = policy.RequiredTierA,
         requiredTierB = policy.RequiredTierB,
         detection = policy.Detection,
@@ -335,11 +337,18 @@ app.MapPost("/v1/attestation/match-start", async (
         }
     }
 
+    var requireAntiTamperOnMatchStart = policyOptions.Value.RequireAntiTamperOnMatchStart;
     if (!request.IntegritySignals.AcServiceHealthy ||
         !request.IntegritySignals.ModulePolicyOk ||
-        !request.IntegritySignals.DriverLoaded)
+        !request.IntegritySignals.DriverLoaded ||
+        (requireAntiTamperOnMatchStart && !request.IntegritySignals.AntiTamperOk))
     {
         return Results.BadRequest(new { error = "integrity_signal_failed" });
+    }
+
+    if (!IsAllowedPolicyHash(policyOptions.Value.RequiredPolicyHashes, request.IntegritySignals.PolicyHash))
+    {
+        return Results.BadRequest(new { error = "policy_hash_not_allowed" });
     }
 
     var serverId = await store.GetServerIdForMatchAsync(request.MatchSessionId, cancellationToken);
@@ -441,7 +450,8 @@ app.MapPost("/v1/attestation/heartbeat", async (
         request.IntegritySignals.AcServiceHealthy &&
         request.IntegritySignals.AntiTamperOk &&
         request.IntegritySignals.ModulePolicyOk &&
-        request.IntegritySignals.DriverLoaded;
+        request.IntegritySignals.DriverLoaded &&
+        IsAllowedPolicyHash(policyOptions.Value.RequiredPolicyHashes, request.IntegritySignals.PolicyHash);
 
     var status = healthy ? "healthy" : "unhealthy";
     var actionHint = healthy ? "none" : "kick";
@@ -1120,6 +1130,35 @@ static string? TryReadBearerToken(HttpContext context)
     }
 
     return value[prefix.Length..].Trim();
+}
+
+static bool IsAllowedPolicyHash(IReadOnlyList<string>? requiredPolicyHashes, string providedPolicyHash)
+{
+    if (requiredPolicyHashes is null || requiredPolicyHashes.Count == 0)
+    {
+        return true;
+    }
+
+    if (string.IsNullOrWhiteSpace(providedPolicyHash))
+    {
+        return false;
+    }
+
+    var normalizedProvided = providedPolicyHash.Trim();
+    foreach (var allowedHash in requiredPolicyHashes)
+    {
+        if (string.IsNullOrWhiteSpace(allowedHash))
+        {
+            continue;
+        }
+
+        if (string.Equals(allowedHash.Trim(), normalizedProvided, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static IResult? EnsureServerAuthorized(HttpContext context, ApiAuthOptions options)
