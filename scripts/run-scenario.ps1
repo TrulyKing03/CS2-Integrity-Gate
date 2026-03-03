@@ -17,6 +17,9 @@ $backend = if ($settings.backendBaseUrl) { $settings.backendBaseUrl } else { "ht
 $bridgeApiKey = if ($settings.bridgeApiKey) { $settings.bridgeApiKey } else { "dev-bridge-api-key" }
 $env:CS2IG_SERVER_API_KEY = if ($settings.serverApiKey) { $settings.serverApiKey } else { "dev-server-api-key" }
 $env:CS2IG_INTERNAL_API_KEY = if ($settings.internalApiKey) { $settings.internalApiKey } else { "dev-internal-api-key" }
+if ($settings.runtimeSigningKey) {
+    $env:CS2IG_RUNTIME_SIGNING_KEY = $settings.runtimeSigningKey
+}
 
 switch ($Scenario.ToLowerInvariant()) {
     "smoke" {

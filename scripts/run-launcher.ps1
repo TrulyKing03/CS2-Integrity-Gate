@@ -5,7 +5,8 @@ param(
     [string]$Backend = "http://localhost:5042",
     [string]$Account = "acc_local_demo",
     [string]$Steam = "76561190000000001",
-    [switch]$SelfValidate
+    [switch]$SelfValidate,
+    [string]$RuntimeSigningKey = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,6 +30,10 @@ else {
 
     if ($SelfValidate) {
         $args += "--self-validate"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($RuntimeSigningKey)) {
+        $args += @("--runtime-signing-key", $RuntimeSigningKey)
     }
 }
 

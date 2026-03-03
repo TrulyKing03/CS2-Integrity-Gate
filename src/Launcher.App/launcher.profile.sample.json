@@ -12,5 +12,6 @@
   "dryRun": true,
   "keepRuntimeFiles": true,
   "selfValidateJoin": false,
-  "serverApiKey": "dev-server-api-key"
+  "serverApiKey": "dev-server-api-key",
+  "runtimeSigningKey": ""
 }

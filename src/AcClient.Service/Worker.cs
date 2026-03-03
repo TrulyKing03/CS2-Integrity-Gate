@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using AcClient.Service.Options;
 using Microsoft.Extensions.Options;
@@ -250,6 +251,16 @@ public sealed class Worker(
             return null;
         }
 
+        if (!string.IsNullOrWhiteSpace(_options.RuntimeSigningKey))
+        {
+            var signatureOk = await ValidateSessionSignatureAsync(json, cancellationToken);
+            if (!signatureOk)
+            {
+                logger.LogWarning("Session signature validation failed. Ignoring runtime session file.");
+                return null;
+            }
+        }
+
         return JsonSerializer.Deserialize<QueueSessionState>(json, JsonOptions);
     }
 
@@ -287,6 +298,7 @@ public sealed class Worker(
     private void EnsureDirectories()
     {
         CreateDirectoryForPath(_options.SessionFilePath);
+        CreateDirectoryForPath(_options.SessionSignaturePath);
         CreateDirectoryForPath(_options.JoinTokenOutputPath);
         CreateDirectoryForPath(_options.DeviceKeyPath);
     }
@@ -301,6 +313,42 @@ public sealed class Worker(
         }
     }
 
+    private async Task<bool> ValidateSessionSignatureAsync(string sessionJson, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_options.RuntimeSigningKey))
+        {
+            return true;
+        }
+
+        if (!File.Exists(_options.SessionSignaturePath))
+        {
+            return false;
+        }
+
+        var signatureJson = await File.ReadAllTextAsync(_options.SessionSignaturePath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(signatureJson))
+        {
+            return false;
+        }
+
+        var signatureFile = JsonSerializer.Deserialize<RuntimeFileSignature>(signatureJson, JsonOptions);
+        if (signatureFile is null ||
+            !string.Equals(signatureFile.Algorithm, "hmac-sha256", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(signatureFile.Signature))
+        {
+            return false;
+        }
+
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_options.RuntimeSigningKey));
+        var expectedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(sessionJson));
+        var expectedHex = Convert.ToHexString(expectedHash).ToLowerInvariant();
+
+        var providedBytes = Encoding.UTF8.GetBytes(signatureFile.Signature.Trim());
+        var expectedBytes = Encoding.UTF8.GetBytes(expectedHex);
+        return providedBytes.Length == expectedBytes.Length &&
+               CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes);
+    }
+
     private sealed record JoinTokenRuntimeFile(
         string MatchSessionId,
         string AccountId,
@@ -308,4 +356,9 @@ public sealed class Worker(
         string ServerId,
         string JoinToken,
         DateTimeOffset ExpiresAtUtc);
+
+    private sealed record RuntimeFileSignature(
+        string Algorithm,
+        string Signature,
+        DateTimeOffset CreatedAtUtc);
 }

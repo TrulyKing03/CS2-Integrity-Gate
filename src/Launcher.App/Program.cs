@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Shared.Contracts;
 
@@ -14,6 +16,7 @@ var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var runtimeDir = Path.GetFullPath(options.RuntimeDir);
 Directory.CreateDirectory(runtimeDir);
 var sessionFile = Path.Combine(runtimeDir, "session.json");
+var sessionSignatureFile = Path.Combine(runtimeDir, "session.sig");
 var joinTokenFile = Path.Combine(runtimeDir, "join-token.json");
 
 using var http = new HttpClient
@@ -26,16 +29,16 @@ try
     switch (options.Command)
     {
         case "play":
-            await RunPlayAsync(http, options, sessionFile, joinTokenFile, jsonOptions);
+            await RunPlayAsync(http, options, sessionFile, sessionSignatureFile, joinTokenFile, jsonOptions);
             break;
         case "doctor":
-            await RunDoctorAsync(http, options, sessionFile, joinTokenFile, jsonOptions);
+            await RunDoctorAsync(http, options, sessionFile, sessionSignatureFile, joinTokenFile, jsonOptions);
             break;
         case "status":
-            RunStatus(options, sessionFile, joinTokenFile, jsonOptions);
+            RunStatus(options, sessionFile, sessionSignatureFile, joinTokenFile, jsonOptions);
             break;
         case "clear-runtime":
-            ClearRuntime(sessionFile, joinTokenFile);
+            ClearRuntime(sessionFile, sessionSignatureFile, joinTokenFile);
             break;
         default:
             throw new ArgumentException(
@@ -52,6 +55,7 @@ static async Task RunPlayAsync(
     HttpClient http,
     LauncherOptions options,
     string sessionFile,
+    string sessionSignatureFile,
     string joinTokenFile,
     JsonSerializerOptions jsonOptions)
 {
@@ -67,7 +71,9 @@ static async Task RunPlayAsync(
         queue.ServerId,
         queue.QueueType,
         DateTimeOffset.UtcNow);
-    await File.WriteAllTextAsync(sessionFile, JsonSerializer.Serialize(session, jsonOptions));
+    var sessionJson = JsonSerializer.Serialize(session, jsonOptions);
+    await File.WriteAllTextAsync(sessionFile, sessionJson);
+    await WriteSessionSignatureIfConfiguredAsync(options, sessionJson, sessionSignatureFile, jsonOptions);
     if (File.Exists(joinTokenFile))
     {
         File.Delete(joinTokenFile);
@@ -127,9 +133,11 @@ static async Task RunPlayAsync(
         }) ?? throw new InvalidOperationException("Failed to launch CS2 process.");
     }
 
-    if (!options.KeepRuntimeFiles && File.Exists(sessionFile))
+    if (!options.KeepRuntimeFiles)
     {
-        File.Delete(sessionFile);
+        DeleteFileIfExists(sessionFile);
+        DeleteFileIfExists(sessionSignatureFile);
+        DeleteFileIfExists(joinTokenFile);
     }
 
     Console.WriteLine("Launcher flow complete.");
@@ -139,6 +147,7 @@ static async Task RunDoctorAsync(
     HttpClient http,
     LauncherOptions options,
     string sessionFile,
+    string sessionSignatureFile,
     string joinTokenFile,
     JsonSerializerOptions jsonOptions)
 {
@@ -179,6 +188,19 @@ static async Task RunDoctorAsync(
         checks.Add(("runtime_session", false, sessionError));
     }
 
+    if (!string.IsNullOrWhiteSpace(options.RuntimeSigningKey))
+    {
+        var signatureOk = VerifySessionSignature(sessionFile, sessionSignatureFile, options.RuntimeSigningKey, jsonOptions);
+        checks.Add((
+            "runtime_session_signature",
+            signatureOk,
+            signatureOk ? "valid" : "missing_or_invalid"));
+    }
+    else
+    {
+        checks.Add(("runtime_session_signature", true, "not_configured"));
+    }
+
     if (TryReadJson<JoinTokenFile>(joinTokenFile, jsonOptions, out var token, out var tokenError))
     {
         var freshness = token!.ExpiresAtUtc > DateTimeOffset.UtcNow ? "fresh" : "expired";
@@ -209,6 +231,7 @@ static async Task RunDoctorAsync(
 static void RunStatus(
     LauncherOptions options,
     string sessionFile,
+    string sessionSignatureFile,
     string joinTokenFile,
     JsonSerializerOptions jsonOptions)
 {
@@ -227,6 +250,16 @@ static void RunStatus(
         Console.WriteLine("Session: missing");
     }
 
+    if (!string.IsNullOrWhiteSpace(options.RuntimeSigningKey))
+    {
+        var signatureOk = VerifySessionSignature(sessionFile, sessionSignatureFile, options.RuntimeSigningKey, jsonOptions);
+        Console.WriteLine($"SessionSignature: {(signatureOk ? "valid" : "missing_or_invalid")}");
+    }
+    else
+    {
+        Console.WriteLine("SessionSignature: not_configured");
+    }
+
     if (TryReadJson<JoinTokenFile>(joinTokenFile, jsonOptions, out var token, out _))
     {
         var state = token!.ExpiresAtUtc > DateTimeOffset.UtcNow ? "fresh" : "expired";
@@ -238,19 +271,85 @@ static void RunStatus(
     }
 }
 
-static void ClearRuntime(string sessionFile, string joinTokenFile)
+static void ClearRuntime(string sessionFile, string sessionSignatureFile, string joinTokenFile)
 {
-    if (File.Exists(sessionFile))
-    {
-        File.Delete(sessionFile);
-    }
-
-    if (File.Exists(joinTokenFile))
-    {
-        File.Delete(joinTokenFile);
-    }
+    DeleteFileIfExists(sessionFile);
+    DeleteFileIfExists(sessionSignatureFile);
+    DeleteFileIfExists(joinTokenFile);
 
     Console.WriteLine("Runtime files cleared.");
+}
+
+static async Task WriteSessionSignatureIfConfiguredAsync(
+    LauncherOptions options,
+    string sessionJson,
+    string sessionSignatureFile,
+    JsonSerializerOptions jsonOptions)
+{
+    if (string.IsNullOrWhiteSpace(options.RuntimeSigningKey))
+    {
+        DeleteFileIfExists(sessionSignatureFile);
+        return;
+    }
+
+    var signature = ComputeSessionSignature(options.RuntimeSigningKey, sessionJson);
+    var payload = new RuntimeSignatureFile("hmac-sha256", signature, DateTimeOffset.UtcNow);
+    await File.WriteAllTextAsync(sessionSignatureFile, JsonSerializer.Serialize(payload, jsonOptions));
+}
+
+static bool VerifySessionSignature(
+    string sessionFile,
+    string sessionSignatureFile,
+    string runtimeSigningKey,
+    JsonSerializerOptions jsonOptions)
+{
+    if (string.IsNullOrWhiteSpace(runtimeSigningKey))
+    {
+        return true;
+    }
+
+    if (!File.Exists(sessionFile) || !File.Exists(sessionSignatureFile))
+    {
+        return false;
+    }
+
+    try
+    {
+        var sessionJson = File.ReadAllText(sessionFile);
+        var signatureJson = File.ReadAllText(sessionSignatureFile);
+        var signatureFile = JsonSerializer.Deserialize<RuntimeSignatureFile>(signatureJson, jsonOptions);
+        if (signatureFile is null ||
+            !string.Equals(signatureFile.Algorithm, "hmac-sha256", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(signatureFile.Signature))
+        {
+            return false;
+        }
+
+        var expected = ComputeSessionSignature(runtimeSigningKey, sessionJson);
+        var expectedBytes = Encoding.UTF8.GetBytes(expected);
+        var providedBytes = Encoding.UTF8.GetBytes(signatureFile.Signature.Trim());
+        return expectedBytes.Length == providedBytes.Length &&
+               CryptographicOperations.FixedTimeEquals(expectedBytes, providedBytes);
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+static string ComputeSessionSignature(string runtimeSigningKey, string sessionJson)
+{
+    using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(runtimeSigningKey));
+    var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(sessionJson));
+    return Convert.ToHexString(hash).ToLowerInvariant();
+}
+
+static void DeleteFileIfExists(string path)
+{
+    if (File.Exists(path))
+    {
+        File.Delete(path);
+    }
 }
 
 static async Task<(string AccountId, string SteamId)> ResolveIdentityAsync(
@@ -414,6 +513,7 @@ static void PrintUsage()
       --cs2-path <path>
       --self-validate
       --server-api-key <key>
+      --runtime-signing-key <key>
       --keep-runtime
       --no-dry-run
     """);
@@ -426,6 +526,11 @@ internal sealed record JoinTokenFile(
     string ServerId,
     string JoinToken,
     DateTimeOffset ExpiresAtUtc);
+
+internal sealed record RuntimeSignatureFile(
+    string Algorithm,
+    string Signature,
+    DateTimeOffset CreatedAtUtc);
 
 internal sealed class LauncherOptions
 {
@@ -446,6 +551,8 @@ internal sealed class LauncherOptions
     public bool SelfValidateJoin { get; private set; }
     public string ServerApiKey { get; private set; } =
         Environment.GetEnvironmentVariable("CS2IG_SERVER_API_KEY") ?? "dev-server-api-key";
+    public string RuntimeSigningKey { get; private set; } =
+        Environment.GetEnvironmentVariable("CS2IG_RUNTIME_SIGNING_KEY") ?? string.Empty;
 
     public static LauncherOptions Parse(string[] args)
     {
@@ -525,6 +632,9 @@ internal sealed class LauncherOptions
                     break;
                 case "--server-api-key":
                     options.ServerApiKey = ReadValue(args, ++i, "--server-api-key");
+                    break;
+                case "--runtime-signing-key":
+                    options.RuntimeSigningKey = ReadValue(args, ++i, "--runtime-signing-key");
                     break;
                 case "--help":
                 case "-h":
@@ -614,6 +724,11 @@ internal sealed class LauncherOptions
         {
             ServerApiKey = profile.ServerApiKey;
         }
+
+        if (!string.IsNullOrWhiteSpace(profile.RuntimeSigningKey))
+        {
+            RuntimeSigningKey = profile.RuntimeSigningKey;
+        }
     }
 
     private static string ReadValue(string[] args, int index, string key)
@@ -643,4 +758,5 @@ internal sealed class LauncherProfile
     public bool? KeepRuntimeFiles { get; set; }
     public bool? SelfValidateJoin { get; set; }
     public string? ServerApiKey { get; set; }
+    public string? RuntimeSigningKey { get; set; }
 }
