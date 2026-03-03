@@ -10,8 +10,9 @@ Included:
   - join validation and allow/deny handling,
   - telemetry buffering and flush,
   - health polling and action application,
-  - pending-action polling with acknowledgments.
+  - pending-action polling with acknowledgments (including failed-apply acks).
 - `MatchRuntimeCoordinator`: per-match background worker that runs health/action poll loops while players are connected.
+- Final telemetry flush on worker shutdown to reduce end-of-match data loss.
 - `IPluginHostBridge`: abstraction for game-server actions (deny/accept/apply/log).
 - `CounterStrikeSharpAdapterSkeleton`: host-facing call surface for real CounterStrikeSharp event hooks.
 

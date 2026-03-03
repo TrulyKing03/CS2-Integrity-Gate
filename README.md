@@ -225,8 +225,9 @@ Main capabilities:
   - join validation on connect attempt,
   - telemetry buffering and flush,
   - match-health polling and transition-based enforcement,
-  - pending-action polling and acknowledgment.
+  - pending-action polling and acknowledgment (apply success/failure recorded).
 - Match runtime coordinator for per-match background loops while players are connected.
+- Final telemetry flush when match workers stop.
 - Typed backend client with server API-key auth header.
 - Host bridge abstraction (`IPluginHostBridge`) so game-framework glue remains isolated.
 - CounterStrikeSharp adapter skeleton ready for event-hook wiring (`connect_attempt`, `connected`, `disconnected`, telemetry events).

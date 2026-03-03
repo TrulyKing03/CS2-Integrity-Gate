@@ -129,19 +129,50 @@ public sealed class PluginRuntime : IDisposable
         var actions = await _client.GetPendingActionsAsync(matchSessionId, accountId, cancellationToken);
         foreach (var action in actions)
         {
-            await _hostBridge.ApplyEnforcementActionAsync(action, cancellationToken);
-            var ack = await _client.AckActionAsync(
-                new EnforcementActionAckRequest(
-                    action.ActionId,
-                    action.MatchSessionId,
-                    action.AccountId,
-                    _options.ExecutorId,
-                    Result: "applied",
-                    Notes: "Applied by Cs2.Plugin.CounterStrikeSharp runtime",
-                    AckedAtUtc: DateTimeOffset.UtcNow),
-                cancellationToken);
-            _hostBridge.LogInfo(
-                $"Action ack: actionId={action.ActionId}, accepted={ack.Accepted}, reason={ack.Reason}");
+            var result = "applied";
+            var notes = "Applied by Cs2.Plugin.CounterStrikeSharp runtime";
+            try
+            {
+                await _hostBridge.ApplyEnforcementActionAsync(action, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result = "failed";
+                notes = $"Host bridge failed: {ex.GetType().Name}: {ex.Message}";
+                _hostBridge.LogError(
+                    $"Action apply failed: actionId={action.ActionId}, account={action.AccountId}",
+                    ex);
+            }
+
+            try
+            {
+                var ack = await _client.AckActionAsync(
+                    new EnforcementActionAckRequest(
+                        action.ActionId,
+                        action.MatchSessionId,
+                        action.AccountId,
+                        _options.ExecutorId,
+                        Result: result,
+                        Notes: notes,
+                        AckedAtUtc: DateTimeOffset.UtcNow),
+                    cancellationToken);
+                _hostBridge.LogInfo(
+                    $"Action ack: actionId={action.ActionId}, accepted={ack.Accepted}, reason={ack.Reason}, result={result}");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _hostBridge.LogError(
+                    $"Action ack failed: actionId={action.ActionId}, result={result}",
+                    ex);
+            }
         }
     }
 

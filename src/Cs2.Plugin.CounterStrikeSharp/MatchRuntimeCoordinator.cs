@@ -112,6 +112,15 @@ public sealed class MatchRuntimeCoordinator : IAsyncDisposable
             }
             finally
             {
+                try
+                {
+                    await _runtime.FlushTelemetryAsync(_matchSessionId, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _hostBridge.LogError($"Final telemetry flush failed for match={_matchSessionId}", ex);
+                }
+
                 _cts.Dispose();
             }
         }
