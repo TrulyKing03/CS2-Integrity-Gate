@@ -61,6 +61,21 @@ internal sealed class DetectionEngine : IDetectionEngine
                     Confidence(playerState.MovementSamples, _thresholds.MinMovementSamples),
                     playerState.MovementSamples,
                     DateTimeOffset.UtcNow));
+
+                if (playerState.MovementSamples >= _thresholds.BehaviorActionMinSamples &&
+                    score >= _thresholds.MovementActionScoreThreshold)
+                {
+                    var behaviorAction = TryCreateAction(
+                        tick.MatchSessionId,
+                        tick.AccountId,
+                        BehaviorActionType(),
+                        "behavior_movement_extreme",
+                        _thresholds.BehaviorActionDurationSec);
+                    if (behaviorAction is not null)
+                    {
+                        actions.Add(behaviorAction);
+                    }
+                }
             }
 
             if (playerState.RuleViolations >= _thresholds.RulesTickActionMinViolations)
@@ -160,6 +175,21 @@ internal sealed class DetectionEngine : IDetectionEngine
                     Confidence(playerState.Shots, _thresholds.MinAimSamples),
                     playerState.Shots,
                     DateTimeOffset.UtcNow));
+
+                if (playerState.Shots >= _thresholds.BehaviorActionMinSamples &&
+                    aimScore >= _thresholds.AimActionScoreThreshold)
+                {
+                    var behaviorAction = TryCreateAction(
+                        shot.MatchSessionId,
+                        shot.ShooterAccountId,
+                        BehaviorActionType(),
+                        "behavior_aim_extreme",
+                        _thresholds.BehaviorActionDurationSec);
+                    if (behaviorAction is not null)
+                    {
+                        actions.Add(behaviorAction);
+                    }
+                }
             }
 
             if (playerState.TriggerSamples >= _thresholds.MinTriggerSamples)
@@ -174,6 +204,21 @@ internal sealed class DetectionEngine : IDetectionEngine
                     Confidence(playerState.TriggerSamples, _thresholds.MinTriggerSamples),
                     playerState.TriggerSamples,
                     DateTimeOffset.UtcNow));
+
+                if (playerState.TriggerSamples >= _thresholds.BehaviorActionMinSamples &&
+                    triggerScore >= _thresholds.TriggerActionScoreThreshold)
+                {
+                    var behaviorAction = TryCreateAction(
+                        shot.MatchSessionId,
+                        shot.ShooterAccountId,
+                        BehaviorActionType(),
+                        "behavior_trigger_extreme",
+                        _thresholds.BehaviorActionDurationSec);
+                    if (behaviorAction is not null)
+                    {
+                        actions.Add(behaviorAction);
+                    }
+                }
             }
 
             if (playerState.InfoSamples >= _thresholds.MinInfoSamples)
@@ -188,6 +233,21 @@ internal sealed class DetectionEngine : IDetectionEngine
                     Confidence(playerState.InfoSamples, _thresholds.MinInfoSamples),
                     playerState.InfoSamples,
                     DateTimeOffset.UtcNow));
+
+                if (playerState.InfoSamples >= _thresholds.BehaviorActionMinSamples &&
+                    infoScore >= _thresholds.InfoActionScoreThreshold)
+                {
+                    var behaviorAction = TryCreateAction(
+                        shot.MatchSessionId,
+                        shot.ShooterAccountId,
+                        BehaviorActionType(),
+                        "behavior_info_extreme",
+                        _thresholds.BehaviorActionDurationSec);
+                    if (behaviorAction is not null)
+                    {
+                        actions.Add(behaviorAction);
+                    }
+                }
             }
 
             if (playerState.RuleViolations >= _thresholds.RulesShotActionMinViolations)
@@ -254,7 +314,8 @@ internal sealed class DetectionEngine : IDetectionEngine
         string matchSessionId,
         string accountId,
         string actionType,
-        string reasonCode)
+        string reasonCode,
+        int durationSeconds = 0)
     {
         var key = $"{matchSessionId}|{accountId}|{reasonCode}";
         var now = DateTimeOffset.UtcNow;
@@ -271,8 +332,15 @@ internal sealed class DetectionEngine : IDetectionEngine
             accountId,
             actionType,
             reasonCode,
-            0,
+            Math.Max(0, durationSeconds),
             now);
+    }
+
+    private string BehaviorActionType()
+    {
+        return string.IsNullOrWhiteSpace(_thresholds.BehaviorActionType)
+            ? "queue_restrict"
+            : _thresholds.BehaviorActionType.Trim().ToLowerInvariant();
     }
 
     private static double ClampTo100(double value) => Math.Max(0, Math.Min(100, value));

@@ -384,6 +384,7 @@ Current implementation stance:
 - Conservative, sample-count aware scoring.
 - Emits score updates and action recommendations.
 - Immediate action currently modeled as kick for severe rule patterns.
+- Optional behavior-threshold actions (default `queue_restrict`) can be emitted for extreme aim/trigger/info/movement channels.
 - Thresholds and sample gates are configurable via `AcPolicy.Detection`.
 
 Important:
