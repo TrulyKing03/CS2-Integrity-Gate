@@ -33,6 +33,27 @@ switch (options.Command)
         Print(status, json);
         break;
     }
+    case "list-security-events":
+    {
+        var route = "v1/ops/security/events";
+        route = Append(route, "sinceMinutes", options.SinceMinutes?.ToString());
+        route = Append(route, "severity", options.Severity);
+        route = Append(route, "eventType", options.EventType);
+        route = Append(route, "limit", options.Limit?.ToString());
+        var items = await http.GetFromJsonAsync<List<SecurityEventRecord>>(route, json)
+            ?? new List<SecurityEventRecord>();
+        Print(items, json);
+        break;
+    }
+    case "security-summary":
+    {
+        var route = "v1/ops/security/summary";
+        route = Append(route, "sinceMinutes", options.SinceMinutes?.ToString());
+        var items = await http.GetFromJsonAsync<List<SecurityEventSummary>>(route, json)
+            ?? new List<SecurityEventSummary>();
+        Print(items, json);
+        break;
+    }
     case "list-evidence":
     {
         var route = "v1/evidence";
@@ -218,6 +239,8 @@ static void PrintUsage()
       system-metrics
       run-cleanup
       cleanup-status
+      list-security-events [--since-minutes <n>] [--severity low|medium|high] [--event <type>] [--limit <n>]
+      security-summary [--since-minutes <n>]
       list-evidence [--match <id>] [--account <id>]
       create-case --evidence <id> --match <id> --account <id> [--reason <code>] [--priority <level>] [--by <actor>]
       list-cases [--status <status>]
@@ -252,6 +275,10 @@ internal sealed class CliOptions
     public string? Notes { get; private set; }
     public int? DurationHours { get; private set; }
     public string? Priority { get; private set; }
+    public int? SinceMinutes { get; private set; }
+    public int? Limit { get; private set; }
+    public string? EventType { get; private set; }
+    public string? Severity { get; private set; }
 
     public static CliOptions Parse(string[] args)
     {
@@ -310,6 +337,19 @@ internal sealed class CliOptions
                         break;
                     case "--priority":
                         options.Priority = Read(args, ++i, arg);
+                        break;
+                    case "--since-minutes":
+                        options.SinceMinutes = int.Parse(Read(args, ++i, arg));
+                        break;
+                    case "--limit":
+                        options.Limit = int.Parse(Read(args, ++i, arg));
+                        break;
+                    case "--event":
+                    case "--event-type":
+                        options.EventType = Read(args, ++i, arg);
+                        break;
+                    case "--severity":
+                        options.Severity = Read(args, ++i, arg);
                         break;
                     default:
                         throw new ArgumentException($"Unknown option {arg}");

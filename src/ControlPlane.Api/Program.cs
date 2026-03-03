@@ -6,6 +6,7 @@ using ControlPlane.Api.Options;
 using ControlPlane.Api.Persistence;
 using ControlPlane.Api.Security;
 using ControlPlane.Api.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Shared.Contracts;
 
@@ -32,12 +33,32 @@ var rateLimitOptions =
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.OnRejected = (context, cancellationToken) =>
+    options.OnRejected = async (context, cancellationToken) =>
     {
+        var httpContext = context.HttpContext;
+        var store = httpContext.RequestServices.GetService<ISqliteStore>();
+        if (store is not null)
+        {
+            await TryWriteSecurityEventAsync(
+                store,
+                eventType: "rate_limited",
+                severity: "medium",
+                source: "rate_limiter",
+                accountId: null,
+                matchSessionId: null,
+                ipAddress: ReadRemoteAddress(httpContext),
+                details: new
+                {
+                    route = httpContext.Request.Path.Value ?? "/",
+                    method = httpContext.Request.Method
+                },
+                cancellationToken);
+        }
+
         context.HttpContext.Response.ContentType = "application/json";
-        return new ValueTask(context.HttpContext.Response.WriteAsJsonAsync(
+        await context.HttpContext.Response.WriteAsJsonAsync(
             new { error = "rate_limited" },
-            cancellationToken: cancellationToken));
+            cancellationToken: cancellationToken);
     };
 
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
@@ -70,6 +91,36 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 var app = builder.Build();
 app.UseRateLimiter();
+app.Use(async (context, next) =>
+{
+    await next();
+
+    if (context.Response.StatusCode != StatusCodes.Status401Unauthorized)
+    {
+        return;
+    }
+
+    var store = context.RequestServices.GetService<ISqliteStore>();
+    if (store is null)
+    {
+        return;
+    }
+
+    await TryWriteSecurityEventAsync(
+        store,
+        eventType: "unauthorized_response",
+        severity: "medium",
+        source: "http_pipeline",
+        accountId: null,
+        matchSessionId: null,
+        ipAddress: ReadRemoteAddress(context),
+        details: new
+        {
+            route = context.Request.Path.Value ?? "/",
+            method = context.Request.Method
+        },
+        context.RequestAborted);
+});
 
 app.MapGet("/", () => Results.Ok(new
 {
@@ -136,6 +187,7 @@ app.MapPost("/v1/ops/cleanup/run", async (
         DateTimeOffset.UtcNow,
         TimeSpan.FromMinutes(Math.Max(1, options.JoinTokenRetentionMinutes)),
         TimeSpan.FromHours(Math.Max(1, options.HeartbeatRetentionHours)),
+        TimeSpan.FromHours(Math.Max(1, options.SecurityEventRetentionHours)),
         TimeSpan.FromHours(Math.Max(1, options.TelemetryRetentionHours)),
         cancellationToken);
     state.SetSuccess(result);
@@ -154,6 +206,54 @@ app.MapGet("/v1/ops/cleanup/status", (
     }
 
     return Results.Ok(state.Snapshot());
+});
+
+app.MapGet("/v1/ops/security/events", async (
+    HttpContext context,
+    int? sinceMinutes,
+    string? severity,
+    string? eventType,
+    int? limit,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var sinceUtc = sinceMinutes is > 0
+        ? DateTimeOffset.UtcNow.AddMinutes(-sinceMinutes.Value)
+        : (DateTimeOffset?)null;
+    var events = await store.ListSecurityEventsAsync(
+        sinceUtc,
+        severity,
+        eventType,
+        limit ?? 200,
+        cancellationToken);
+    return Results.Ok(events);
+});
+
+app.MapGet("/v1/ops/security/summary", async (
+    HttpContext context,
+    int? sinceMinutes,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var sinceUtc = sinceMinutes is > 0
+        ? DateTimeOffset.UtcNow.AddMinutes(-sinceMinutes.Value)
+        : (DateTimeOffset?)null;
+    var summary = await store.GetSecurityEventSummaryAsync(sinceUtc, cancellationToken);
+    return Results.Ok(summary);
 });
 
 app.MapPost("/v1/auth/login", async (
@@ -206,6 +306,16 @@ app.MapPost("/v1/queue/enqueue", async (
     {
         if (string.IsNullOrWhiteSpace(token))
         {
+            await TryWriteSecurityEventAsync(
+                store,
+                eventType: "queue_access_denied",
+                severity: "medium",
+                source: "queue",
+                accountId: request.AccountId,
+                matchSessionId: null,
+                ipAddress: ReadRemoteAddress(context),
+                details: new { reason = "missing_access_token" },
+                cancellationToken);
             return Results.Unauthorized();
         }
 
@@ -217,6 +327,16 @@ app.MapPost("/v1/queue/enqueue", async (
             cancellationToken);
         if (!valid)
         {
+            await TryWriteSecurityEventAsync(
+                store,
+                eventType: "queue_access_denied",
+                severity: "medium",
+                source: "queue",
+                accountId: request.AccountId,
+                matchSessionId: null,
+                ipAddress: ReadRemoteAddress(context),
+                details: new { reason = "invalid_access_token" },
+                cancellationToken);
             return Results.Unauthorized();
         }
     }
@@ -225,6 +345,16 @@ app.MapPost("/v1/queue/enqueue", async (
     var activeBan = await store.GetActiveBanForAccountAsync(request.AccountId, cancellationToken);
     if (activeBan is not null)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "queue_banned_account_attempt",
+            severity: "high",
+            source: "queue",
+            accountId: request.AccountId,
+            matchSessionId: null,
+            ipAddress: ReadRemoteAddress(context),
+            details: new { activeBan.BanId, activeBan.Scope, activeBan.Status },
+            cancellationToken);
         return Results.BadRequest(new
         {
             error = "account_banned",
@@ -298,6 +428,16 @@ app.MapPost("/v1/attestation/match-start", async (
     var activeBan = await store.GetActiveBanForAccountAsync(request.AccountId, cancellationToken);
     if (activeBan is not null)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "match_start_banned_account",
+            severity: "high",
+            source: "attestation.match_start",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: null,
+            details: new { activeBan.BanId, activeBan.Scope, activeBan.Status },
+            cancellationToken);
         return Results.BadRequest(new
         {
             error = "account_banned",
@@ -315,11 +455,31 @@ app.MapPost("/v1/attestation/match-start", async (
         cancellationToken);
     if (!deviceBound)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "device_binding_mismatch",
+            severity: "high",
+            source: "attestation.match_start",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: null,
+            details: new { request.DeviceId, reason = "unknown_or_mismatched_device" },
+            cancellationToken);
         return Results.BadRequest(new { error = "unknown_or_mismatched_device" });
     }
 
     if (!request.PlatformSignals.SecureBoot || !request.PlatformSignals.Tpm20)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "platform_tier_a_failed",
+            severity: "high",
+            source: "attestation.match_start",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: null,
+            details: request.PlatformSignals,
+            cancellationToken);
         return Results.BadRequest(new { error = "tier_a_requirements_not_met" });
     }
 
@@ -328,11 +488,31 @@ app.MapPost("/v1/attestation/match-start", async (
     {
         if (policyOptions.Value.RequiredTierB.Iommu && !request.PlatformSignals.Iommu)
         {
+            await TryWriteSecurityEventAsync(
+                store,
+                eventType: "platform_tier_b_failed",
+                severity: "medium",
+                source: "attestation.match_start",
+                accountId: request.AccountId,
+                matchSessionId: request.MatchSessionId,
+                ipAddress: null,
+                details: new { reason = "iommu_required" },
+                cancellationToken);
             return Results.BadRequest(new { error = "tier_b_iommu_required_for_high_trust" });
         }
 
         if (policyOptions.Value.RequiredTierB.Vbs && !request.PlatformSignals.Vbs)
         {
+            await TryWriteSecurityEventAsync(
+                store,
+                eventType: "platform_tier_b_failed",
+                severity: "medium",
+                source: "attestation.match_start",
+                accountId: request.AccountId,
+                matchSessionId: request.MatchSessionId,
+                ipAddress: null,
+                details: new { reason = "vbs_required" },
+                cancellationToken);
             return Results.BadRequest(new { error = "tier_b_vbs_required_for_high_trust" });
         }
     }
@@ -343,11 +523,31 @@ app.MapPost("/v1/attestation/match-start", async (
         !request.IntegritySignals.DriverLoaded ||
         (requireAntiTamperOnMatchStart && !request.IntegritySignals.AntiTamperOk))
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "integrity_signal_failed",
+            severity: "high",
+            source: "attestation.match_start",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: null,
+            details: request.IntegritySignals,
+            cancellationToken);
         return Results.BadRequest(new { error = "integrity_signal_failed" });
     }
 
     if (!IsAllowedPolicyHash(policyOptions.Value.RequiredPolicyHashes, request.IntegritySignals.PolicyHash))
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "policy_hash_not_allowed",
+            severity: "high",
+            source: "attestation.match_start",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: null,
+            details: new { request.IntegritySignals.PolicyHash },
+            cancellationToken);
         return Results.BadRequest(new { error = "policy_hash_not_allowed" });
     }
 
@@ -418,6 +618,17 @@ app.MapPost("/v1/attestation/heartbeat", async (
             "kick",
             cancellationToken);
 
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "device_binding_mismatch",
+            severity: "high",
+            source: "attestation.heartbeat",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: null,
+            details: new { request.DeviceId, request.Sequence },
+            cancellationToken);
+
         return Results.Ok(new HeartbeatResponse(
             "unhealthy",
             policyOptions.Value.HeartbeatIntervalSec,
@@ -436,6 +647,17 @@ app.MapPost("/v1/attestation/heartbeat", async (
             "banned",
             bannedAt,
             "kick",
+            cancellationToken);
+
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "heartbeat_banned_account",
+            severity: "high",
+            source: "attestation.heartbeat",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: null,
+            details: new { activeBan.BanId, request.Sequence },
             cancellationToken);
 
         return Results.Ok(new HeartbeatResponse(
@@ -467,6 +689,20 @@ app.MapPost("/v1/attestation/heartbeat", async (
         actionHint,
         cancellationToken);
 
+    if (!healthy)
+    {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "heartbeat_unhealthy",
+            severity: "medium",
+            source: "attestation.heartbeat",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: null,
+            details: request.IntegritySignals,
+            cancellationToken);
+    }
+
     return Results.Ok(new HeartbeatResponse(
         status,
         policyOptions.Value.HeartbeatIntervalSec,
@@ -491,6 +727,16 @@ app.MapPost("/v1/attestation/validate-join", async (
     var activeBan = await store.GetActiveBanForAccountAsync(request.AccountId, cancellationToken);
     if (activeBan is not null)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "join_denied_banned_account",
+            severity: "high",
+            source: "attestation.validate_join",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: ReadRemoteAddress(context),
+            details: new { request.ServerId, activeBan.BanId, activeBan.Scope },
+            cancellationToken);
         return Results.Ok(new ValidateJoinResponse(
             Allow: false,
             Reason: "account_banned",
@@ -500,6 +746,16 @@ app.MapPost("/v1/attestation/validate-join", async (
 
     if (!tokenService.TryValidate(request.JoinToken, out var payload, out var reason) || payload is null)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "join_denied_invalid_token",
+            severity: "high",
+            source: "attestation.validate_join",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: ReadRemoteAddress(context),
+            details: new { request.ServerId, reason = reason ?? "invalid_token" },
+            cancellationToken);
         return Results.Ok(new ValidateJoinResponse(false, reason ?? "invalid_token", "unknown", "unknown"));
     }
 
@@ -508,34 +764,98 @@ app.MapPost("/v1/attestation/validate-join", async (
         !string.Equals(payload.SteamId, request.SteamId, StringComparison.Ordinal) ||
         !string.Equals(payload.ServerId, request.ServerId, StringComparison.Ordinal))
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "join_denied_claim_mismatch",
+            severity: "high",
+            source: "attestation.validate_join",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: ReadRemoteAddress(context),
+            details: new
+            {
+                expected = new { request.AccountId, request.SteamId, request.ServerId, request.MatchSessionId },
+                token = new { payload.AccountId, payload.SteamId, payload.ServerId, payload.MatchSessionId }
+            },
+            cancellationToken);
         return Results.Ok(new ValidateJoinResponse(false, "token_claim_mismatch", "unknown", "unknown"));
     }
 
     var tokenRecord = await store.GetJoinTokenAsync(payload.Jti, cancellationToken);
     if (tokenRecord is null)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "join_denied_token_not_issued",
+            severity: "high",
+            source: "attestation.validate_join",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: ReadRemoteAddress(context),
+            details: new { payload.Jti },
+            cancellationToken);
         return Results.Ok(new ValidateJoinResponse(false, "token_not_issued", "unknown", "unknown"));
     }
 
     if (tokenRecord.UsedAtUtc is not null)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "join_denied_token_replayed",
+            severity: "high",
+            source: "attestation.validate_join",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: ReadRemoteAddress(context),
+            details: new { payload.Jti, tokenRecord.UsedAtUtc },
+            cancellationToken);
         return Results.Ok(new ValidateJoinResponse(false, "token_replayed", "unknown", "unknown"));
     }
 
     var latestHeartbeat = await store.GetLatestHeartbeatAsync(request.MatchSessionId, request.AccountId, cancellationToken);
     if (latestHeartbeat is null)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "join_denied_missing_heartbeat",
+            severity: "medium",
+            source: "attestation.validate_join",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: ReadRemoteAddress(context),
+            details: new { payload.Jti },
+            cancellationToken);
         return Results.Ok(new ValidateJoinResponse(false, "missing_heartbeat", "unhealthy", "unknown"));
     }
 
     var staleCutoff = DateTimeOffset.UtcNow.AddSeconds(-policyOptions.Value.GraceWindowSec);
     if (latestHeartbeat.ReceivedAtUtc < staleCutoff)
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "join_denied_stale_heartbeat",
+            severity: "medium",
+            source: "attestation.validate_join",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: ReadRemoteAddress(context),
+            details: new { latestHeartbeat.ReceivedAtUtc, staleCutoff },
+            cancellationToken);
         return Results.Ok(new ValidateJoinResponse(false, "stale_heartbeat", "unhealthy", "unknown"));
     }
 
     if (!string.Equals(latestHeartbeat.Status, "healthy", StringComparison.OrdinalIgnoreCase))
     {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "join_denied_unhealthy_heartbeat",
+            severity: "medium",
+            source: "attestation.validate_join",
+            accountId: request.AccountId,
+            matchSessionId: request.MatchSessionId,
+            ipAddress: ReadRemoteAddress(context),
+            details: new { latestHeartbeat.Status },
+            cancellationToken);
         return Results.Ok(new ValidateJoinResponse(false, "heartbeat_unhealthy", "unhealthy", "unknown"));
     }
 
@@ -1087,6 +1407,8 @@ static string ResolveRateLimitPolicy(string path)
     }
 
     if (path.StartsWith("/v1/evidence", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/metrics/", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/v1/ops/", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith("/v1/review/", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith("/v1/moderation/", StringComparison.OrdinalIgnoreCase))
     {
@@ -1132,6 +1454,47 @@ static string? TryReadBearerToken(HttpContext context)
     }
 
     return value[prefix.Length..].Trim();
+}
+
+static async Task TryWriteSecurityEventAsync(
+    ISqliteStore store,
+    string eventType,
+    string severity,
+    string source,
+    string? accountId,
+    string? matchSessionId,
+    string? ipAddress,
+    object? details,
+    CancellationToken cancellationToken)
+{
+    var normalizedEventType = string.IsNullOrWhiteSpace(eventType)
+        ? "unknown_event"
+        : eventType.Trim().ToLowerInvariant();
+    var normalizedSeverity = string.IsNullOrWhiteSpace(severity)
+        ? "low"
+        : severity.Trim().ToLowerInvariant();
+    var normalizedSource = string.IsNullOrWhiteSpace(source)
+        ? "unknown_source"
+        : source.Trim().ToLowerInvariant();
+    var detailsJson = details is null ? "{}" : JsonSerializer.Serialize(details);
+
+    try
+    {
+        await store.AddSecurityEventAsync(
+            normalizedEventType,
+            normalizedSeverity,
+            normalizedSource,
+            string.IsNullOrWhiteSpace(accountId) ? null : accountId.Trim(),
+            string.IsNullOrWhiteSpace(matchSessionId) ? null : matchSessionId.Trim(),
+            string.IsNullOrWhiteSpace(ipAddress) ? null : ipAddress.Trim(),
+            detailsJson,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+    }
+    catch
+    {
+        // Security-event persistence must never break primary request flow.
+    }
 }
 
 static bool IsAllowedPolicyHash(IReadOnlyList<string>? requiredPolicyHashes, string providedPolicyHash)

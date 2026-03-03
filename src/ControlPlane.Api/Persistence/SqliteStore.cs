@@ -96,10 +96,30 @@ public interface ISqliteStore
     Task<AppealRecord> CreateAppealAsync(CreateAppealRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<AppealRecord>> ListAppealsAsync(string? status, CancellationToken cancellationToken);
     Task<AppealRecord?> ResolveAppealAsync(ResolveAppealRequest request, CancellationToken cancellationToken);
+    Task AddSecurityEventAsync(
+        string eventType,
+        string severity,
+        string source,
+        string? accountId,
+        string? matchSessionId,
+        string? ipAddress,
+        string detailsJson,
+        DateTimeOffset createdAtUtc,
+        CancellationToken cancellationToken);
+    Task<IReadOnlyList<SecurityEventRecord>> ListSecurityEventsAsync(
+        DateTimeOffset? sinceUtc,
+        string? severity,
+        string? eventType,
+        int limit,
+        CancellationToken cancellationToken);
+    Task<IReadOnlyList<SecurityEventSummary>> GetSecurityEventSummaryAsync(
+        DateTimeOffset? sinceUtc,
+        CancellationToken cancellationToken);
     Task<DataCleanupResult> CleanupExpiredOperationalDataAsync(
         DateTimeOffset nowUtc,
         TimeSpan joinTokenRetention,
         TimeSpan heartbeatRetention,
+        TimeSpan securityEventRetention,
         TimeSpan telemetryRetention,
         CancellationToken cancellationToken);
     Task<SystemSummaryMetrics> GetSystemSummaryMetricsAsync(CancellationToken cancellationToken);
@@ -138,7 +158,8 @@ public sealed record DataCleanupResult(
     int ExpiredAccountSessionsDeleted,
     int ExpiredJoinTokensDeleted,
     int ExpiredHeartbeatsDeleted,
-    int ExpiredTelemetryDeleted);
+    int ExpiredTelemetryDeleted,
+    int ExpiredSecurityEventsDeleted);
 
 public sealed class SqliteStore : ISqliteStore
 {
@@ -376,6 +397,24 @@ public sealed class SqliteStore : ISqliteStore
                 reviewer_id TEXT NULL,
                 decision_notes TEXT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS security_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                source TEXT NOT NULL,
+                account_id TEXT NULL,
+                match_session_id TEXT NULL,
+                ip_address TEXT NULL,
+                details_json TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_security_events_created
+                ON security_events (created_at_utc DESC);
+
+            CREATE INDEX IF NOT EXISTS ix_security_events_type_created
+                ON security_events (event_type, created_at_utc DESC);
             """;
         await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1809,10 +1848,152 @@ public sealed class SqliteStore : ISqliteStore
         return appeal;
     }
 
+    public async Task AddSecurityEventAsync(
+        string eventType,
+        string severity,
+        string source,
+        string? accountId,
+        string? matchSessionId,
+        string? ipAddress,
+        string detailsJson,
+        DateTimeOffset createdAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO security_events (
+                event_type, severity, source, account_id, match_session_id, ip_address, details_json, created_at_utc
+            )
+            VALUES (
+                $event_type, $severity, $source, $account_id, $match_session_id, $ip_address, $details_json, $created_at_utc
+            );
+            """;
+        cmd.Parameters.AddWithValue("$event_type", eventType);
+        cmd.Parameters.AddWithValue("$severity", severity);
+        cmd.Parameters.AddWithValue("$source", source);
+        cmd.Parameters.AddWithValue("$account_id", (object?)accountId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$match_session_id", (object?)matchSessionId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ip_address", (object?)ipAddress ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$details_json", string.IsNullOrWhiteSpace(detailsJson) ? "{}" : detailsJson);
+        cmd.Parameters.AddWithValue("$created_at_utc", createdAtUtc.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SecurityEventRecord>> ListSecurityEventsAsync(
+        DateTimeOffset? sinceUtc,
+        string? severity,
+        string? eventType,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var normalizedLimit = Math.Clamp(limit, 1, 1000);
+        var result = new List<SecurityEventRecord>();
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        var query = """
+            SELECT event_id, event_type, severity, source, account_id, match_session_id, ip_address, details_json, created_at_utc
+            FROM security_events
+            WHERE 1 = 1
+            """;
+        if (sinceUtc is not null)
+        {
+            query += """
+
+              AND created_at_utc >= $since_utc
+            """;
+            cmd.Parameters.AddWithValue("$since_utc", sinceUtc.Value.ToString("O"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(severity))
+        {
+            query += """
+
+              AND severity = $severity
+            """;
+            cmd.Parameters.AddWithValue("$severity", severity.Trim().ToLowerInvariant());
+        }
+
+        if (!string.IsNullOrWhiteSpace(eventType))
+        {
+            query += """
+
+              AND event_type = $event_type
+            """;
+            cmd.Parameters.AddWithValue("$event_type", eventType.Trim().ToLowerInvariant());
+        }
+
+        query += """
+
+            ORDER BY created_at_utc DESC
+            LIMIT $limit;
+            """;
+        cmd.Parameters.AddWithValue("$limit", normalizedLimit);
+        cmd.CommandText = query;
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new SecurityEventRecord(
+                EventId: reader.GetInt64(0),
+                EventType: reader.GetString(1),
+                Severity: reader.GetString(2),
+                Source: reader.GetString(3),
+                AccountId: reader.IsDBNull(4) ? null : reader.GetString(4),
+                MatchSessionId: reader.IsDBNull(5) ? null : reader.GetString(5),
+                IpAddress: reader.IsDBNull(6) ? null : reader.GetString(6),
+                DetailsJson: reader.GetString(7),
+                CreatedAtUtc: DateTimeOffset.Parse(reader.GetString(8))));
+        }
+
+        return result;
+    }
+
+    public async Task<IReadOnlyList<SecurityEventSummary>> GetSecurityEventSummaryAsync(
+        DateTimeOffset? sinceUtc,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<SecurityEventSummary>();
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT
+                event_type,
+                severity,
+                COUNT(1) AS event_count,
+                MIN(created_at_utc) AS first_seen_utc,
+                MAX(created_at_utc) AS last_seen_utc
+            FROM security_events
+            WHERE ($since_utc IS NULL OR created_at_utc >= $since_utc)
+            GROUP BY event_type, severity
+            ORDER BY event_count DESC, last_seen_utc DESC;
+            """;
+        cmd.Parameters.AddWithValue("$since_utc", sinceUtc is null ? DBNull.Value : sinceUtc.Value.ToString("O"));
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new SecurityEventSummary(
+                EventType: reader.GetString(0),
+                Severity: reader.GetString(1),
+                Count: reader.GetInt32(2),
+                FirstSeenUtc: DateTimeOffset.Parse(reader.GetString(3)),
+                LastSeenUtc: DateTimeOffset.Parse(reader.GetString(4))));
+        }
+
+        return result;
+    }
+
     public async Task<DataCleanupResult> CleanupExpiredOperationalDataAsync(
         DateTimeOffset nowUtc,
         TimeSpan joinTokenRetention,
         TimeSpan heartbeatRetention,
+        TimeSpan securityEventRetention,
         TimeSpan telemetryRetention,
         CancellationToken cancellationToken)
     {
@@ -1820,10 +2001,12 @@ public sealed class SqliteStore : ISqliteStore
         var joinTokensDeleted = 0;
         var heartbeatsDeleted = 0;
         var telemetryDeleted = 0;
+        var securityEventsDeleted = 0;
 
         var nowText = nowUtc.ToString("O");
         var joinTokenCutoff = nowUtc.Subtract(joinTokenRetention).ToString("O");
         var heartbeatCutoff = nowUtc.Subtract(heartbeatRetention).ToString("O");
+        var securityEventCutoff = nowUtc.Subtract(securityEventRetention).ToString("O");
         var telemetryCutoff = nowUtc.Subtract(telemetryRetention).ToString("O");
 
         await using var connection = new SqliteConnection(_connectionString);
@@ -1867,6 +2050,17 @@ public sealed class SqliteStore : ISqliteStore
         {
             cmd.Transaction = tx;
             cmd.CommandText = """
+                DELETE FROM security_events
+                WHERE created_at_utc <= $security_event_cutoff_utc;
+                """;
+            cmd.Parameters.AddWithValue("$security_event_cutoff_utc", securityEventCutoff);
+            securityEventsDeleted = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
                 DELETE FROM telemetry_events
                 WHERE created_at_utc <= $telemetry_cutoff_utc;
                 """;
@@ -1880,7 +2074,8 @@ public sealed class SqliteStore : ISqliteStore
             accountSessionsDeleted,
             joinTokensDeleted,
             heartbeatsDeleted,
-            telemetryDeleted);
+            telemetryDeleted,
+            securityEventsDeleted);
     }
 
     public async Task<SystemSummaryMetrics> GetSystemSummaryMetricsAsync(CancellationToken cancellationToken)

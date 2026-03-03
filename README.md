@@ -268,6 +268,7 @@ Central shared DTO contract library used by all services:
 - Join validation DTOs.
 - Telemetry DTOs (`TickPlayerState`, `ShotEvent`, `LosSample`).
 - Detection score and enforcement action DTOs.
+- Security-event DTOs for ops audit queries.
 
 ## `Reviewer.Console`
 
@@ -275,6 +276,7 @@ Main capabilities:
 
 - Internal moderation CLI with `X-Internal-Api-Key` auth.
 - System summary metrics view for quick operational checks.
+- Security-event listing and aggregate summaries for incident triage.
 - Evidence listing and lookup.
 - Review-case creation and status updates.
 - Ban creation/listing/status updates and appeal lifecycle handling.
@@ -299,6 +301,8 @@ System:
 - `GET /v1/metrics/summary` (internal auth)
 - `POST /v1/ops/cleanup/run` (internal auth)
 - `GET /v1/ops/cleanup/status` (internal auth)
+- `GET /v1/ops/security/events` (internal auth)
+- `GET /v1/ops/security/summary` (internal auth)
 
 Auth + Queue:
 
@@ -420,6 +424,7 @@ Tables created automatically by `SqliteStore.InitializeAsync`:
 - `bans`
 - `ban_events`
 - `appeals`
+- `security_events`
 
 Data captured:
 
@@ -430,6 +435,7 @@ Data captured:
 - telemetry event stream.
 - per-channel suspicion scores.
 - enforcement action records.
+- security-event audit trail (unauthorized/rate-limit/policy/integrity rejects).
 - evidence pack metadata and hashes.
 - review/moderation case history.
 - ban lifecycle history (creation/revoke/status changes).
@@ -470,6 +476,7 @@ Key sections:
 - `DataRetention.SweepIntervalMinutes`
 - `DataRetention.JoinTokenRetentionMinutes`
 - `DataRetention.HeartbeatRetentionHours`
+- `DataRetention.SecurityEventRetentionHours`
 - `DataRetention.TelemetryRetentionHours`
 
 Production notes:
@@ -559,6 +566,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario gate
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario queue-auth -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario retention -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario policy-hash -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-events -SettingsPath ops/stack.settings.sample.json
 ```
 
 Local stack manager:
@@ -627,6 +635,8 @@ Reviewer workflow examples:
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key system-metrics
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-cleanup
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key cleanup-status
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key security-summary --since-minutes 60
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-security-events --since-minutes 60 --limit 50
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-bans --account $session.accountId --status active
@@ -656,6 +666,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-policy-hash.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-security-events.ps1
 ```
 
 `smoke-plugin-gateway.ps1` verifies connect flow, telemetry ingestion, host-action consume, and gateway metrics endpoints.
@@ -674,6 +685,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-policy-hash.ps1
 8. Run `scripts/smoke-queue-auth.ps1` when changing auth/queue flow.
 9. Run `scripts/smoke-retention-status.ps1` when changing cleanup/ops behavior.
 10. Run `scripts/smoke-policy-hash.ps1` when changing AC policy enforcement.
+11. Run `scripts/smoke-security-events.ps1` when changing auth/rate-limit/ops auditing paths.
 
 ## Reset local state
 
@@ -835,6 +847,7 @@ No telemetry actions generated:
 |   |-- smoke-queue-auth.ps1
 |   |-- smoke-retention-status.ps1
 |   |-- smoke-policy-hash.ps1
+|   |-- smoke-security-events.ps1
 |   |-- smoke-ban-lifecycle.ps1
 |   `-- reviewer-demo.ps1
 |-- tools
@@ -863,6 +876,7 @@ Current scope:
 - Telemetry ingest and baseline detector outputs.
 - Local plugin HTTP gateway for runtime integration.
 - Ban-aware queue/join/heartbeat gating.
+- Security-event audit logging and ops query endpoints.
 - Evidence, review, ban, and appeal workflow APIs.
 - Offline threshold report generation for detector tuning.
 - SQLite-backed persistence.

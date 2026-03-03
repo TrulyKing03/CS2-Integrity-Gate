@@ -40,6 +40,7 @@ public sealed class RetentionCleanupWorker(
                 DateTimeOffset.UtcNow,
                 TimeSpan.FromMinutes(Math.Max(1, _options.JoinTokenRetentionMinutes)),
                 TimeSpan.FromHours(Math.Max(1, _options.HeartbeatRetentionHours)),
+                TimeSpan.FromHours(Math.Max(1, _options.SecurityEventRetentionHours)),
                 TimeSpan.FromHours(Math.Max(1, _options.TelemetryRetentionHours)),
                 cancellationToken);
             state.SetSuccess(result);
@@ -47,15 +48,17 @@ public sealed class RetentionCleanupWorker(
             var total = result.ExpiredAccountSessionsDeleted +
                         result.ExpiredJoinTokensDeleted +
                         result.ExpiredHeartbeatsDeleted +
-                        result.ExpiredTelemetryDeleted;
+                        result.ExpiredTelemetryDeleted +
+                        result.ExpiredSecurityEventsDeleted;
             if (total > 0)
             {
                 logger.LogInformation(
-                    "Retention cleanup deleted: sessions={Sessions}, joinTokens={JoinTokens}, heartbeats={Heartbeats}, telemetry={Telemetry}",
+                    "Retention cleanup deleted: sessions={Sessions}, joinTokens={JoinTokens}, heartbeats={Heartbeats}, telemetry={Telemetry}, securityEvents={SecurityEvents}",
                     result.ExpiredAccountSessionsDeleted,
                     result.ExpiredJoinTokensDeleted,
                     result.ExpiredHeartbeatsDeleted,
-                    result.ExpiredTelemetryDeleted);
+                    result.ExpiredTelemetryDeleted,
+                    result.ExpiredSecurityEventsDeleted);
             }
             else
             {

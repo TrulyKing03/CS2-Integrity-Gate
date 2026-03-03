@@ -10,4 +10,5 @@ public sealed class DataRetentionOptions
     public int JoinTokenRetentionMinutes { get; set; } = 180;
     public int HeartbeatRetentionHours { get; set; } = 72;
     public int TelemetryRetentionHours { get; set; } = 72;
+    public int SecurityEventRetentionHours { get; set; } = 168;
 }

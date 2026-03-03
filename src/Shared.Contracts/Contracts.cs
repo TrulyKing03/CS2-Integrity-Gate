@@ -272,3 +272,21 @@ public sealed record JoinTokenPayload(
     string DeviceId,
     DateTimeOffset IssuedAtUtc,
     DateTimeOffset ExpiresAtUtc);
+
+public sealed record SecurityEventRecord(
+    long EventId,
+    string EventType,
+    string Severity,
+    string Source,
+    string? AccountId,
+    string? MatchSessionId,
+    string? IpAddress,
+    string DetailsJson,
+    DateTimeOffset CreatedAtUtc);
+
+public sealed record SecurityEventSummary(
+    string EventType,
+    string Severity,
+    int Count,
+    DateTimeOffset FirstSeenUtc,
+    DateTimeOffset LastSeenUtc);
