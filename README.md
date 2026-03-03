@@ -487,6 +487,12 @@ Expected result:
 - Queue is blocked after ban (`account_banned`).
 - Queue succeeds again after appeal is resolved with `overturned`.
 
+QA runner:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Fast
+```
+
 Reviewer end-to-end demo:
 
 ```powershell
@@ -547,6 +553,7 @@ dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --i
 3. Confirm `/healthz` responds.
 4. Confirm `src/ControlPlane.Api/data/controlplane.db` updates.
 5. Confirm action feed returns expected actions for synthetic cheat mode.
+6. Run `scripts/qa-run.ps1 -Fast` before merge.
 
 ## Reset local state
 
@@ -665,6 +672,7 @@ No telemetry actions generated:
 |   `-- runbooks
 |-- scripts
 |   |-- backup-controlplane.ps1
+|   |-- qa-run.ps1
 |   |-- restore-controlplane.ps1
 |   |-- run-controlplane.ps1
 |   |-- run-ac-service.ps1
