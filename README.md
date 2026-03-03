@@ -33,7 +33,7 @@ This repository is a runnable MVP foundation designed for integration into your 
 
 ## Repository Overview
 
-This repo contains six active .NET projects plus staged domain folders and scripts:
+This repo contains multiple active .NET projects plus staged domain folders and scripts:
 
 - `src/ControlPlane.Api`: backend control plane API.
 - `src/AcClient.Service`: local anti-cheat service process.
@@ -45,7 +45,7 @@ This repo contains six active .NET projects plus staged domain folders and scrip
 - `src/Kernel.Driver`: reserved for kernel component.
 - `src/Kernel.Bridge`: reserved for user/kernel communication layer.
 - `src/Reviewer.Console`: moderation and appeals CLI for internal endpoints.
-- `analytics/detection-tuning`: reserved for detection calibration jobs.
+- `analytics/detection-tuning`: offline threshold tuning job(s) for detector calibration.
 - `ops/`: infrastructure, observability, security, and runbooks.
 - `scripts/`: helper scripts for startup and smoke tests.
 
@@ -242,6 +242,14 @@ Main capabilities:
 - Review-case creation and status updates.
 - Ban creation/listing/status updates and appeal lifecycle handling.
 
+## `ThresholdTuner.Console`
+
+Main capabilities:
+
+- Reads persisted suspicion scores from SQLite.
+- Computes channel distributions (`p50/p90/p95/p99`) and outlier summaries.
+- Generates threshold report JSON for review/auto-action policy tuning.
+
 ## API Surface
 
 From `src/ControlPlane.Api/Program.cs`.
@@ -339,7 +347,7 @@ Important:
 
 SQLite database path (default):
 
-- `data/controlplane.db`
+- `src/ControlPlane.Api/data/controlplane.db`
 - Evidence JSON output (default when running API project): `src/ControlPlane.Api/evidence/`
 
 Tables created automatically by `SqliteStore.InitializeAsync`:
@@ -461,6 +469,12 @@ powershell -ExecutionPolicy Bypass -File scripts/reviewer-demo.ps1
 
 This executes launcher + AC + server simulation and then runs evidence/review/ban/appeal operations through `Reviewer.Console`.
 
+Detection-threshold report job:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run-threshold-tuner.ps1
+```
+
 ## Manual run (4 terminals)
 
 Terminal 1:
@@ -504,13 +518,14 @@ dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --i
 1. Build solution.
 2. Run smoke test.
 3. Confirm `/healthz` responds.
-4. Confirm `data/controlplane.db` updates.
+4. Confirm `src/ControlPlane.Api/data/controlplane.db` updates.
 5. Confirm action feed returns expected actions for synthetic cheat mode.
 
 ## Reset local state
 
 ```powershell
 Remove-Item -Recurse -Force runtime,data -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force src/ControlPlane.Api/data -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force src/ControlPlane.Api/evidence -ErrorAction SilentlyContinue
 ```
 
@@ -593,6 +608,7 @@ No telemetry actions generated:
 |-- README.md
 |-- analytics
 |   `-- detection-tuning
+|       `-- ThresholdTuner.Console
 |-- ops
 |   |-- infra
 |   |-- observability
@@ -602,6 +618,7 @@ No telemetry actions generated:
 |   |-- run-controlplane.ps1
 |   |-- run-ac-service.ps1
 |   |-- run-launcher.ps1
+|   |-- run-threshold-tuner.ps1
 |   |-- smoke-test.ps1
 |   `-- reviewer-demo.ps1
 |-- tools
@@ -628,6 +645,7 @@ Current scope:
 - Telemetry ingest and baseline detector outputs.
 - Ban-aware queue/join/heartbeat gating.
 - Evidence, review, ban, and appeal workflow APIs.
+- Offline threshold report generation for detector tuning.
 - SQLite-backed persistence.
 - Local run scripts.
 

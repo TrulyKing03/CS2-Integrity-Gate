@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/analytics/">
+    <Project Path="analytics/detection-tuning/ThresholdTuner.Console/ThresholdTuner.Console.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/AcClient.Service/AcClient.Service.csproj" />
     <Project Path="src/Cs2.Plugin.CounterStrikeSharp/Cs2.Plugin.CounterStrikeSharp.csproj" />

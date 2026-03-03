@@ -3,3 +3,4 @@
 runtime/
 data/
 src/ControlPlane.Api/evidence/
+analytics/detection-tuning/output/
