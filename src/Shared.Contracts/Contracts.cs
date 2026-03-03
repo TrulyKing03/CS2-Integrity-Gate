@@ -275,6 +275,22 @@ public sealed record ResolveAppealRequest(
     string Status,
     string DecisionNotes);
 
+public sealed record QueueRestrictionRecord(
+    string RestrictionId,
+    string AccountId,
+    string ReasonCode,
+    string Status,
+    DateTimeOffset StartAtUtc,
+    DateTimeOffset EndAtUtc,
+    string CreatedBy,
+    DateTimeOffset CreatedAtUtc);
+
+public sealed record CreateQueueRestrictionRequest(
+    string AccountId,
+    string ReasonCode,
+    int DurationSeconds,
+    string CreatedBy);
+
 public sealed record QueueSessionState(
     string AccountId,
     string SteamId,

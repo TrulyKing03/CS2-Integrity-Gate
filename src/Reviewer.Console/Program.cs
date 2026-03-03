@@ -91,6 +91,27 @@ switch (options.Command)
         Print(rows, json);
         break;
     }
+    case "create-queue-restriction":
+    {
+        var request = new CreateQueueRestrictionRequest(
+            AccountId: options.Require("--account", options.AccountId),
+            ReasonCode: options.ReasonCode ?? "manual_queue_restrict",
+            DurationSeconds: options.DurationSeconds ?? 1800,
+            CreatedBy: options.RequestedBy ?? "reviewer_console");
+        var response = await http.PostAsJsonAsync("v1/ops/queue-restrictions", request, json);
+        await EnsureAndPrintAsync(response, json);
+        break;
+    }
+    case "list-queue-restrictions":
+    {
+        var route = "v1/ops/queue-restrictions";
+        route = Append(route, "accountId", options.AccountId);
+        route = Append(route, "status", options.Status);
+        var rows = await http.GetFromJsonAsync<List<QueueRestrictionRecord>>(route, json)
+            ?? new List<QueueRestrictionRecord>();
+        Print(rows, json);
+        break;
+    }
     case "list-evidence":
     {
         var route = "v1/evidence";
@@ -284,6 +305,8 @@ static void PrintUsage()
       security-alert-status
       run-security-alert-eval [--force]
       list-action-acks [--match <id>] [--account <id>] [--action <id>] [--limit <n>]
+      create-queue-restriction --account <id> [--reason <code>] [--duration-sec <n>] [--by <actor>]
+      list-queue-restrictions [--account <id>] [--status active|expired]
       list-evidence [--match <id>] [--account <id>]
       create-case --evidence <id> --match <id> --account <id> [--reason <code>] [--priority <level>] [--by <actor>]
       list-cases [--status <status>] [--match <id>] [--account <id>]
@@ -324,6 +347,7 @@ internal sealed class CliOptions
     public string? Severity { get; private set; }
     public bool Force { get; private set; }
     public string? ActionId { get; private set; }
+    public int? DurationSeconds { get; private set; }
 
     public static CliOptions Parse(string[] args)
     {
@@ -379,6 +403,10 @@ internal sealed class CliOptions
                         break;
                     case "--duration-hours":
                         options.DurationHours = int.Parse(Read(args, ++i, arg));
+                        break;
+                    case "--duration-sec":
+                    case "--duration-seconds":
+                        options.DurationSeconds = int.Parse(Read(args, ++i, arg));
                         break;
                     case "--priority":
                         options.Priority = Read(args, ++i, arg);

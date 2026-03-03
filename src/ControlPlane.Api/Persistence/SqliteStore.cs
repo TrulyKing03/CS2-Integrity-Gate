@@ -100,6 +100,9 @@ public interface ISqliteStore
         string? accountId,
         CancellationToken cancellationToken);
     Task<ReviewCaseSummary?> UpdateReviewCaseAsync(UpdateReviewCaseRequest request, CancellationToken cancellationToken);
+    Task<QueueRestrictionRecord> CreateQueueRestrictionAsync(CreateQueueRestrictionRequest request, CancellationToken cancellationToken);
+    Task<IReadOnlyList<QueueRestrictionRecord>> ListQueueRestrictionsAsync(string? accountId, string? status, CancellationToken cancellationToken);
+    Task<QueueRestrictionRecord?> GetActiveQueueRestrictionAsync(string accountId, DateTimeOffset nowUtc, CancellationToken cancellationToken);
     Task<BanRecord> CreateBanAsync(CreateBanRequest request, CancellationToken cancellationToken);
     Task<BanRecord?> GetBanAsync(string banId, CancellationToken cancellationToken);
     Task<BanRecord?> GetActiveBanForAccountAsync(string accountId, CancellationToken cancellationToken);
@@ -409,6 +412,20 @@ public sealed class SqliteStore : ISqliteStore
                 reviewer_id TEXT NULL,
                 decision_notes TEXT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS queue_restrictions (
+                restriction_id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                reason_code TEXT NOT NULL,
+                status TEXT NOT NULL,
+                start_at_utc TEXT NOT NULL,
+                end_at_utc TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_queue_restrictions_account_status
+                ON queue_restrictions (account_id, status, start_at_utc, end_at_utc);
 
             CREATE TABLE IF NOT EXISTS security_events (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1604,6 +1621,164 @@ public sealed class SqliteStore : ISqliteStore
             AssignedReviewer = request.ReviewerId,
             UpdatedAtUtc = now
         };
+    }
+
+    public async Task<QueueRestrictionRecord> CreateQueueRestrictionAsync(
+        CreateQueueRestrictionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var duration = Math.Max(1, request.DurationSeconds);
+        var record = new QueueRestrictionRecord(
+            RestrictionId: $"qr_{Guid.NewGuid():N}",
+            AccountId: request.AccountId,
+            ReasonCode: request.ReasonCode,
+            Status: "active",
+            StartAtUtc: now,
+            EndAtUtc: now.AddSeconds(duration),
+            CreatedBy: request.CreatedBy,
+            CreatedAtUtc: now);
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO queue_restrictions (
+                restriction_id, account_id, reason_code, status, start_at_utc, end_at_utc, created_by, created_at_utc
+            )
+            VALUES (
+                $restriction_id, $account_id, $reason_code, $status, $start_at_utc, $end_at_utc, $created_by, $created_at_utc
+            );
+            """;
+        cmd.Parameters.AddWithValue("$restriction_id", record.RestrictionId);
+        cmd.Parameters.AddWithValue("$account_id", record.AccountId);
+        cmd.Parameters.AddWithValue("$reason_code", record.ReasonCode);
+        cmd.Parameters.AddWithValue("$status", record.Status);
+        cmd.Parameters.AddWithValue("$start_at_utc", record.StartAtUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("$end_at_utc", record.EndAtUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("$created_by", record.CreatedBy);
+        cmd.Parameters.AddWithValue("$created_at_utc", record.CreatedAtUtc.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
+
+        return record;
+    }
+
+    public async Task<IReadOnlyList<QueueRestrictionRecord>> ListQueueRestrictionsAsync(
+        string? accountId,
+        string? status,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<QueueRestrictionRecord>();
+        var nowUtc = DateTimeOffset.UtcNow.ToString("O");
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        var query = """
+            SELECT restriction_id, account_id, reason_code, status, start_at_utc, end_at_utc, created_by, created_at_utc
+            FROM queue_restrictions
+            WHERE 1 = 1
+            """;
+        if (!string.IsNullOrWhiteSpace(accountId))
+        {
+            query += """
+
+              AND account_id = $account_id
+            """;
+            cmd.Parameters.AddWithValue("$account_id", accountId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var normalizedStatus = status.Trim().ToLowerInvariant();
+            if (normalizedStatus == "active")
+            {
+                query += """
+
+                  AND status = 'active'
+                  AND start_at_utc <= $now_utc
+                  AND end_at_utc > $now_utc
+                """;
+                cmd.Parameters.AddWithValue("$now_utc", nowUtc);
+            }
+            else if (normalizedStatus == "expired")
+            {
+                query += """
+
+                  AND (
+                    (status = 'active' AND end_at_utc <= $now_utc)
+                    OR status = 'expired'
+                  )
+                """;
+                cmd.Parameters.AddWithValue("$now_utc", nowUtc);
+            }
+            else
+            {
+                query += """
+
+                  AND status = $status
+                """;
+                cmd.Parameters.AddWithValue("$status", normalizedStatus);
+            }
+        }
+
+        query += """
+
+            ORDER BY created_at_utc DESC
+            LIMIT 500;
+            """;
+        cmd.CommandText = query;
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new QueueRestrictionRecord(
+                RestrictionId: reader.GetString(0),
+                AccountId: reader.GetString(1),
+                ReasonCode: reader.GetString(2),
+                Status: reader.GetString(3),
+                StartAtUtc: DateTimeOffset.Parse(reader.GetString(4)),
+                EndAtUtc: DateTimeOffset.Parse(reader.GetString(5)),
+                CreatedBy: reader.GetString(6),
+                CreatedAtUtc: DateTimeOffset.Parse(reader.GetString(7))));
+        }
+
+        return result;
+    }
+
+    public async Task<QueueRestrictionRecord?> GetActiveQueueRestrictionAsync(
+        string accountId,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT restriction_id, account_id, reason_code, status, start_at_utc, end_at_utc, created_by, created_at_utc
+            FROM queue_restrictions
+            WHERE account_id = $account_id
+              AND status = 'active'
+              AND start_at_utc <= $now_utc
+              AND end_at_utc > $now_utc
+            ORDER BY created_at_utc DESC
+            LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("$account_id", accountId);
+        cmd.Parameters.AddWithValue("$now_utc", nowUtc.ToString("O"));
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new QueueRestrictionRecord(
+            RestrictionId: reader.GetString(0),
+            AccountId: reader.GetString(1),
+            ReasonCode: reader.GetString(2),
+            Status: reader.GetString(3),
+            StartAtUtc: DateTimeOffset.Parse(reader.GetString(4)),
+            EndAtUtc: DateTimeOffset.Parse(reader.GetString(5)),
+            CreatedBy: reader.GetString(6),
+            CreatedAtUtc: DateTimeOffset.Parse(reader.GetString(7)));
     }
 
     public async Task<BanRecord> CreateBanAsync(CreateBanRequest request, CancellationToken cancellationToken)

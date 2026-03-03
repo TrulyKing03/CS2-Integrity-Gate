@@ -363,6 +363,66 @@ app.MapPost("/v1/ops/auth/sessions/revoke", async (
         RevokedAtUtc: revokedAtUtc));
 });
 
+app.MapPost("/v1/ops/queue-restrictions", async (
+    CreateQueueRestrictionRequest request,
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    if (string.IsNullOrWhiteSpace(request.AccountId))
+    {
+        return Results.BadRequest(new { error = "account_id_required" });
+    }
+
+    var duration = Math.Max(1, request.DurationSeconds);
+    var created = await store.CreateQueueRestrictionAsync(
+        request with
+        {
+            AccountId = request.AccountId.Trim(),
+            ReasonCode = string.IsNullOrWhiteSpace(request.ReasonCode) ? "manual_queue_restrict" : request.ReasonCode.Trim(),
+            DurationSeconds = duration,
+            CreatedBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? "internal_api" : request.CreatedBy.Trim()
+        },
+        cancellationToken);
+    await TryWriteSecurityEventAsync(
+        store,
+        eventType: "queue_restriction_created",
+        severity: "low",
+        source: "ops.queue_restrictions.create",
+        accountId: created.AccountId,
+        matchSessionId: null,
+        ipAddress: ReadRemoteAddress(context),
+        details: new { created.RestrictionId, created.ReasonCode, durationSeconds = duration, created.EndAtUtc },
+        cancellationToken);
+
+    return Results.Ok(created);
+});
+
+app.MapGet("/v1/ops/queue-restrictions", async (
+    HttpContext context,
+    string? accountId,
+    string? status,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var rows = await store.ListQueueRestrictionsAsync(accountId, status, cancellationToken);
+    return Results.Ok(rows);
+});
+
 app.MapPost("/v1/auth/login", async (
     LoginRequest request,
     ISqliteStore store,
@@ -499,6 +559,36 @@ app.MapPost("/v1/queue/enqueue", async (
             activeBan.Scope,
             activeBan.Status,
             activeBan.EndAtUtc
+        });
+    }
+
+    var activeRestriction = await store.GetActiveQueueRestrictionAsync(
+        request.AccountId,
+        DateTimeOffset.UtcNow,
+        cancellationToken);
+    if (activeRestriction is not null)
+    {
+        await TryWriteSecurityEventAsync(
+            store,
+            eventType: "queue_restriction_blocked",
+            severity: "medium",
+            source: "queue",
+            accountId: request.AccountId,
+            matchSessionId: null,
+            ipAddress: ReadRemoteAddress(context),
+            details: new
+            {
+                activeRestriction.RestrictionId,
+                activeRestriction.ReasonCode,
+                activeRestriction.EndAtUtc
+            },
+            cancellationToken);
+        return Results.BadRequest(new
+        {
+            error = "queue_restricted",
+            activeRestriction.RestrictionId,
+            activeRestriction.ReasonCode,
+            activeRestriction.EndAtUtc
         });
     }
 

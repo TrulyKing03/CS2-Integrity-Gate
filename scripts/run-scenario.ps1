@@ -78,12 +78,16 @@ switch ($Scenario.ToLowerInvariant()) {
         powershell -ExecutionPolicy Bypass -File scripts/smoke-action-ack-audit.ps1 -Backend $backend
         break
     }
+    "queue-restrict" {
+        powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-restriction.ps1 -Backend $backend
+        break
+    }
     "qa-full" {
         powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Backend $backend
         break
     }
     default {
-        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|gateway|queue-auth|retention|policy-hash|security-events|security-alerts|security-alerts-manual|session-revoke|auto-review|action-ack|qa-fast|qa-full)"
+        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|gateway|queue-auth|retention|policy-hash|security-events|security-alerts|security-alerts-manual|session-revoke|auto-review|action-ack|queue-restrict|qa-fast|qa-full)"
     }
 }
 
