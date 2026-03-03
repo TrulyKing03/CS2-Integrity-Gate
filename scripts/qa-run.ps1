@@ -10,6 +10,7 @@ param(
     [switch]$SkipPolicyHashSmoke,
     [switch]$SkipSecurityEventSmoke,
     [switch]$SkipSecurityAlertSmoke,
+    [switch]$SkipSecurityAlertManualSmoke,
     [string]$ReportPath = ""
 )
 
@@ -121,6 +122,10 @@ try {
 
     if (-not $Fast -and -not $SkipSecurityAlertSmoke) {
         Invoke-Step "smoke-security-alert-status" { powershell -ExecutionPolicy Bypass -File scripts/smoke-security-alert-status.ps1 -Backend $Backend }
+    }
+
+    if (-not $Fast -and -not $SkipSecurityAlertManualSmoke) {
+        Invoke-Step "smoke-security-alert-manual" { powershell -ExecutionPolicy Bypass -File scripts/smoke-security-alert-manual.ps1 -Backend $Backend }
     }
 
     Invoke-Step "threshold-tuner-sanity" { powershell -ExecutionPolicy Bypass -File scripts/run-threshold-tuner.ps1 -MinSamples 1 -MinConfidence 0.1 }

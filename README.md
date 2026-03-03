@@ -279,6 +279,7 @@ Main capabilities:
 - System summary metrics view for quick operational checks.
 - Security-event listing and aggregate summaries for incident triage.
 - Security alert status checks (threshold/cooldown worker state).
+- Manual security alert evaluation trigger for operations.
 - Account session revocation tooling for compromised-token response.
 - Evidence listing and lookup.
 - Review-case creation and status updates.
@@ -307,6 +308,7 @@ System:
 - `GET /v1/ops/security/events` (internal auth)
 - `GET /v1/ops/security/summary` (internal auth)
 - `GET /v1/ops/security/alerts/status` (internal auth)
+- `POST /v1/ops/security/alerts/evaluate` (internal auth)
 - `POST /v1/ops/auth/sessions/revoke` (internal auth)
 
 Auth + Queue:
@@ -580,6 +582,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario rete
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario policy-hash -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-events -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-alerts -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-alerts-manual -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario session-revoke -SettingsPath ops/stack.settings.sample.json
 ```
 
@@ -653,6 +656,8 @@ dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --i
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key security-summary --since-minutes 60
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-security-events --since-minutes 60 --limit 50
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key security-alert-status
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-security-alert-eval
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-security-alert-eval --force
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-bans --account $session.accountId --status active
@@ -685,6 +690,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-policy-hash.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-security-events.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-security-alert-status.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-security-alert-manual.ps1
 ```
 
 `smoke-plugin-gateway.ps1` verifies connect flow, telemetry ingestion, host-action consume, and gateway metrics endpoints.
@@ -706,6 +712,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-security-alert-status.ps1
 11. Run `scripts/smoke-policy-hash.ps1` when changing AC policy enforcement.
 12. Run `scripts/smoke-security-events.ps1` when changing auth/rate-limit/ops auditing paths.
 13. Run `scripts/smoke-security-alert-status.ps1` when changing security alert thresholds or worker behavior.
+14. Run `scripts/smoke-security-alert-manual.ps1` when changing manual alert evaluation flows.
 
 ## Reset local state
 
@@ -871,6 +878,7 @@ No telemetry actions generated:
 |   |-- smoke-policy-hash.ps1
 |   |-- smoke-security-events.ps1
 |   |-- smoke-security-alert-status.ps1
+|   |-- smoke-security-alert-manual.ps1
 |   |-- smoke-ban-lifecycle.ps1
 |   `-- reviewer-demo.ps1
 |-- tools

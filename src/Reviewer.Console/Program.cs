@@ -71,6 +71,14 @@ switch (options.Command)
         Print(status, json);
         break;
     }
+    case "run-security-alert-eval":
+    {
+        var route = "v1/ops/security/alerts/evaluate";
+        route = Append(route, "force", options.Force ? "true" : null);
+        var response = await http.PostAsync(route, content: null);
+        await EnsureAndPrintAsync(response, json);
+        break;
+    }
     case "list-evidence":
     {
         var route = "v1/evidence";
@@ -260,6 +268,7 @@ static void PrintUsage()
       list-security-events [--since-minutes <n>] [--severity low|medium|high] [--event <type>] [--limit <n>]
       security-summary [--since-minutes <n>]
       security-alert-status
+      run-security-alert-eval [--force]
       list-evidence [--match <id>] [--account <id>]
       create-case --evidence <id> --match <id> --account <id> [--reason <code>] [--priority <level>] [--by <actor>]
       list-cases [--status <status>]
@@ -298,6 +307,7 @@ internal sealed class CliOptions
     public int? Limit { get; private set; }
     public string? EventType { get; private set; }
     public string? Severity { get; private set; }
+    public bool Force { get; private set; }
 
     public static CliOptions Parse(string[] args)
     {
@@ -369,6 +379,9 @@ internal sealed class CliOptions
                         break;
                     case "--severity":
                         options.Severity = Read(args, ++i, arg);
+                        break;
+                    case "--force":
+                        options.Force = true;
                         break;
                     default:
                         throw new ArgumentException($"Unknown option {arg}");

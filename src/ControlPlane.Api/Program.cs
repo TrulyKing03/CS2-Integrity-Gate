@@ -23,6 +23,7 @@ builder.Services.AddSingleton<ISqliteStore, SqliteStore>();
 builder.Services.AddSingleton<IJoinTokenService, JoinTokenService>();
 builder.Services.AddSingleton<IDetectionEngine, DetectionEngine>();
 builder.Services.AddSingleton<IEvidenceService, EvidenceService>();
+builder.Services.AddSingleton<ISecurityAlertEvaluator, SecurityAlertEvaluator>();
 builder.Services.AddSingleton<RetentionCleanupState>();
 builder.Services.AddSingleton<SecurityAlertState>();
 builder.Services.AddHostedService<StartupInitializer>();
@@ -271,6 +272,26 @@ app.MapGet("/v1/ops/security/alerts/status", (
     }
 
     return Results.Ok(state.Snapshot());
+});
+
+app.MapPost("/v1/ops/security/alerts/evaluate", async (
+    HttpContext context,
+    bool? force,
+    ISecurityAlertEvaluator evaluator,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var result = await evaluator.EvaluateAsync(
+        source: "manual_ops",
+        force: force ?? false,
+        cancellationToken);
+    return Results.Ok(result);
 });
 
 app.MapPost("/v1/ops/auth/sessions/revoke", async (
