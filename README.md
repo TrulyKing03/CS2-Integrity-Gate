@@ -182,6 +182,7 @@ Notable behaviors:
 - Heartbeat freshness is enforced using configured grace window.
 - Policy is config-driven for token TTL and heartbeat cadence.
 - Enforcement actions are de-duplicated server-side within policy cooldown windows to reduce duplicate kicks/evidence churn.
+- Periodic retention cleanup removes expired account sessions/tokens and old telemetry/heartbeat records.
 
 ## `AcClient.Service`
 
@@ -295,6 +296,7 @@ System:
 - `GET /healthz`
 - `GET /v1/policy/current`
 - `GET /v1/metrics/summary` (internal auth)
+- `POST /v1/ops/cleanup/run` (internal auth)
 
 Auth + Queue:
 
@@ -355,6 +357,7 @@ Internal-auth protected endpoints:
 
 - Require header `X-Internal-Api-Key`:
   - `/v1/metrics/*`
+  - `/v1/ops/*`
   - `/v1/evidence/*`
   - `/v1/review/*`
   - `/v1/moderation/*`
@@ -397,6 +400,7 @@ Tables created automatically by `SqliteStore.InitializeAsync`:
 
 - `accounts`
 - `steam_links`
+- `account_sessions`
 - `devices`
 - `match_sessions`
 - `match_players`
@@ -456,6 +460,12 @@ Key sections:
 - `Evidence.StorageDirectory`
 - `Evidence.RecentTelemetryLimit`
 - `Evidence.RecentHeartbeatsLimit`
+- `DataRetention.Enabled`
+- `DataRetention.RunOnStartup`
+- `DataRetention.SweepIntervalMinutes`
+- `DataRetention.JoinTokenRetentionMinutes`
+- `DataRetention.HeartbeatRetentionHours`
+- `DataRetention.TelemetryRetentionHours`
 
 Production notes:
 
@@ -673,6 +683,13 @@ powershell -ExecutionPolicy Bypass -File scripts/restore-controlplane.ps1 -Backu
 ```
 
 Detailed runbook: `ops/runbooks/backup-recovery.md`
+
+Manual retention cleanup trigger (internal auth):
+
+```powershell
+$headers = @{ "X-Internal-Api-Key" = "dev-internal-api-key" }
+Invoke-RestMethod -Method Post -Uri "http://localhost:5042/v1/ops/cleanup/run" -Headers $headers
+```
 
 ## Integration Notes
 

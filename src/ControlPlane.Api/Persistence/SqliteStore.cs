@@ -96,6 +96,12 @@ public interface ISqliteStore
     Task<AppealRecord> CreateAppealAsync(CreateAppealRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<AppealRecord>> ListAppealsAsync(string? status, CancellationToken cancellationToken);
     Task<AppealRecord?> ResolveAppealAsync(ResolveAppealRequest request, CancellationToken cancellationToken);
+    Task<DataCleanupResult> CleanupExpiredOperationalDataAsync(
+        DateTimeOffset nowUtc,
+        TimeSpan joinTokenRetention,
+        TimeSpan heartbeatRetention,
+        TimeSpan telemetryRetention,
+        CancellationToken cancellationToken);
     Task<SystemSummaryMetrics> GetSystemSummaryMetricsAsync(CancellationToken cancellationToken);
 }
 
@@ -126,6 +132,13 @@ public sealed record SystemSummaryMetrics(
     int EvidencePackCount,
     DateTimeOffset? LastHeartbeatUtc,
     DateTimeOffset? LastTelemetryUtc);
+
+public sealed record DataCleanupResult(
+    DateTimeOffset RanAtUtc,
+    int ExpiredAccountSessionsDeleted,
+    int ExpiredJoinTokensDeleted,
+    int ExpiredHeartbeatsDeleted,
+    int ExpiredTelemetryDeleted);
 
 public sealed class SqliteStore : ISqliteStore
 {
@@ -1786,6 +1799,80 @@ public sealed class SqliteStore : ISqliteStore
 
         await tx.CommitAsync(cancellationToken);
         return appeal;
+    }
+
+    public async Task<DataCleanupResult> CleanupExpiredOperationalDataAsync(
+        DateTimeOffset nowUtc,
+        TimeSpan joinTokenRetention,
+        TimeSpan heartbeatRetention,
+        TimeSpan telemetryRetention,
+        CancellationToken cancellationToken)
+    {
+        var accountSessionsDeleted = 0;
+        var joinTokensDeleted = 0;
+        var heartbeatsDeleted = 0;
+        var telemetryDeleted = 0;
+
+        var nowText = nowUtc.ToString("O");
+        var joinTokenCutoff = nowUtc.Subtract(joinTokenRetention).ToString("O");
+        var heartbeatCutoff = nowUtc.Subtract(heartbeatRetention).ToString("O");
+        var telemetryCutoff = nowUtc.Subtract(telemetryRetention).ToString("O");
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                DELETE FROM account_sessions
+                WHERE expires_at_utc <= $now_utc;
+                """;
+            cmd.Parameters.AddWithValue("$now_utc", nowText);
+            accountSessionsDeleted = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                DELETE FROM join_tokens
+                WHERE expires_at_utc <= $join_token_cutoff_utc;
+                """;
+            cmd.Parameters.AddWithValue("$join_token_cutoff_utc", joinTokenCutoff);
+            joinTokensDeleted = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                DELETE FROM heartbeats
+                WHERE received_at_utc <= $heartbeat_cutoff_utc;
+                """;
+            cmd.Parameters.AddWithValue("$heartbeat_cutoff_utc", heartbeatCutoff);
+            heartbeatsDeleted = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                DELETE FROM telemetry_events
+                WHERE created_at_utc <= $telemetry_cutoff_utc;
+                """;
+            cmd.Parameters.AddWithValue("$telemetry_cutoff_utc", telemetryCutoff);
+            telemetryDeleted = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await tx.CommitAsync(cancellationToken);
+        return new DataCleanupResult(
+            nowUtc,
+            accountSessionsDeleted,
+            joinTokensDeleted,
+            heartbeatsDeleted,
+            telemetryDeleted);
     }
 
     public async Task<SystemSummaryMetrics> GetSystemSummaryMetricsAsync(CancellationToken cancellationToken)

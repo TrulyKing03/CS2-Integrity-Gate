@@ -16,11 +16,13 @@ builder.Services.Configure<AcPolicyOptions>(builder.Configuration.GetSection(AcP
 builder.Services.Configure<ApiAuthOptions>(builder.Configuration.GetSection(ApiAuthOptions.SectionName));
 builder.Services.Configure<ApiRateLimitOptions>(builder.Configuration.GetSection(ApiRateLimitOptions.SectionName));
 builder.Services.Configure<EvidenceOptions>(builder.Configuration.GetSection(EvidenceOptions.SectionName));
+builder.Services.Configure<DataRetentionOptions>(builder.Configuration.GetSection(DataRetentionOptions.SectionName));
 builder.Services.AddSingleton<ISqliteStore, SqliteStore>();
 builder.Services.AddSingleton<IJoinTokenService, JoinTokenService>();
 builder.Services.AddSingleton<IDetectionEngine, DetectionEngine>();
 builder.Services.AddSingleton<IEvidenceService, EvidenceService>();
 builder.Services.AddHostedService<StartupInitializer>();
+builder.Services.AddHostedService<RetentionCleanupWorker>();
 
 var rateLimitOptions =
     builder.Configuration.GetSection(ApiRateLimitOptions.SectionName).Get<ApiRateLimitOptions>() ??
@@ -110,6 +112,29 @@ app.MapGet("/v1/metrics/summary", async (
 
     var summary = await store.GetSystemSummaryMetricsAsync(cancellationToken);
     return Results.Ok(summary);
+});
+
+app.MapPost("/v1/ops/cleanup/run", async (
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    IOptions<DataRetentionOptions> retentionOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var options = retentionOptions.Value;
+    var result = await store.CleanupExpiredOperationalDataAsync(
+        DateTimeOffset.UtcNow,
+        TimeSpan.FromMinutes(Math.Max(1, options.JoinTokenRetentionMinutes)),
+        TimeSpan.FromHours(Math.Max(1, options.HeartbeatRetentionHours)),
+        TimeSpan.FromHours(Math.Max(1, options.TelemetryRetentionHours)),
+        cancellationToken);
+    return Results.Ok(result);
 });
 
 app.MapPost("/v1/auth/login", async (
