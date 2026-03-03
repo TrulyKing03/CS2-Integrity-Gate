@@ -12,6 +12,9 @@ Included:
   - health polling and action application,
   - pending-action polling with acknowledgments (including failed-apply acks).
 - Pending-action polling honors `PluginRuntimeOptions.PendingActionFetchLimit` to cap per-poll load.
+- Pending-action handling includes local apply dedupe and ack retry backoff:
+  - `PluginRuntimeOptions.ActionApplyDedupeSec`
+  - `PluginRuntimeOptions.ActionAckRetrySec`
 - `MatchRuntimeCoordinator`: per-match background worker that runs health/action poll loops while players are connected.
 - Final telemetry flush on worker shutdown to reduce end-of-match data loss.
 - `IPluginHostBridge`: abstraction for game-server actions (deny/accept/apply/log).

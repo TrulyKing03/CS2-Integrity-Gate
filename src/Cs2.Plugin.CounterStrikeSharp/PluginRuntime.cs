@@ -12,6 +12,7 @@ public sealed class PluginRuntime : IDisposable
     private readonly ConcurrentDictionary<string, TelemetryBuffer> _buffers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastFlushUtc = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _lastHealthStatus = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ActionExecutionState> _actionExecution = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _flushGate = new(1, 1);
 
     public PluginRuntime(
@@ -126,28 +127,69 @@ public sealed class PluginRuntime : IDisposable
         string? accountId,
         CancellationToken cancellationToken)
     {
+        var now = DateTimeOffset.UtcNow;
+        TrimActionExecutionCache(now);
+
         var fetchLimit = Math.Max(1, _options.PendingActionFetchLimit);
         var actions = await _client.GetPendingActionsAsync(matchSessionId, accountId, fetchLimit, cancellationToken);
         foreach (var action in actions)
         {
-            var result = "applied";
-            var notes = "Applied by Cs2.Plugin.CounterStrikeSharp runtime";
-            try
+            var state = _actionExecution.GetOrAdd(
+                action.ActionId,
+                _ => new ActionExecutionState(
+                    Result: "pending",
+                    Notes: "pending",
+                    AppliedAtUtc: DateTimeOffset.MinValue,
+                    LastSeenUtc: now,
+                    LastAckAttemptUtc: DateTimeOffset.MinValue,
+                    AckAttempts: 0));
+
+            state = state with { LastSeenUtc = now };
+
+            if (string.Equals(state.Result, "pending", StringComparison.OrdinalIgnoreCase))
             {
-                await _hostBridge.ApplyEnforcementActionAsync(action, cancellationToken);
+                var result = "applied";
+                var notes = "Applied by Cs2.Plugin.CounterStrikeSharp runtime";
+                try
+                {
+                    await _hostBridge.ApplyEnforcementActionAsync(action, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    result = "failed";
+                    notes = $"Host bridge failed: {ex.GetType().Name}: {ex.Message}";
+                    _hostBridge.LogError(
+                        $"Action apply failed: actionId={action.ActionId}, account={action.AccountId}",
+                        ex);
+                }
+
+                state = state with
+                {
+                    Result = result,
+                    Notes = notes,
+                    AppliedAtUtc = now,
+                    LastSeenUtc = now
+                };
+                _actionExecution[action.ActionId] = state;
             }
-            catch (OperationCanceledException)
+
+            if (state.LastAckAttemptUtc != DateTimeOffset.MinValue &&
+                now - state.LastAckAttemptUtc < TimeSpan.FromSeconds(Math.Max(1, _options.ActionAckRetrySec)))
             {
-                throw;
+                continue;
             }
-            catch (Exception ex)
+
+            state = state with
             {
-                result = "failed";
-                notes = $"Host bridge failed: {ex.GetType().Name}: {ex.Message}";
-                _hostBridge.LogError(
-                    $"Action apply failed: actionId={action.ActionId}, account={action.AccountId}",
-                    ex);
-            }
+                LastAckAttemptUtc = now,
+                LastSeenUtc = now,
+                AckAttempts = state.AckAttempts + 1
+            };
+            _actionExecution[action.ActionId] = state;
 
             try
             {
@@ -157,12 +199,18 @@ public sealed class PluginRuntime : IDisposable
                         action.MatchSessionId,
                         action.AccountId,
                         _options.ExecutorId,
-                        Result: result,
-                        Notes: notes,
+                        Result: state.Result,
+                        Notes: state.Notes,
                         AckedAtUtc: DateTimeOffset.UtcNow),
                     cancellationToken);
                 _hostBridge.LogInfo(
-                    $"Action ack: actionId={action.ActionId}, accepted={ack.Accepted}, reason={ack.Reason}, result={result}");
+                    $"Action ack: actionId={action.ActionId}, accepted={ack.Accepted}, reason={ack.Reason}, result={state.Result}, attempts={state.AckAttempts}");
+
+                if (ack.Accepted ||
+                    string.Equals(ack.Reason, "already_acked", StringComparison.OrdinalIgnoreCase))
+                {
+                    _actionExecution.TryRemove(action.ActionId, out _);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -171,7 +219,7 @@ public sealed class PluginRuntime : IDisposable
             catch (Exception ex)
             {
                 _hostBridge.LogError(
-                    $"Action ack failed: actionId={action.ActionId}, result={result}",
+                    $"Action ack failed: actionId={action.ActionId}, result={state.Result}, attempts={state.AckAttempts}",
                     ex);
             }
         }
@@ -250,4 +298,26 @@ public sealed class PluginRuntime : IDisposable
             _flushGate.Release();
         }
     }
+
+    private void TrimActionExecutionCache(DateTimeOffset now)
+    {
+        var dedupeWindow = TimeSpan.FromSeconds(Math.Max(30, _options.ActionApplyDedupeSec));
+        foreach (var pair in _actionExecution)
+        {
+            if (now - pair.Value.LastSeenUtc <= dedupeWindow)
+            {
+                continue;
+            }
+
+            _actionExecution.TryRemove(pair.Key, out _);
+        }
+    }
+
+    private sealed record ActionExecutionState(
+        string Result,
+        string Notes,
+        DateTimeOffset AppliedAtUtc,
+        DateTimeOffset LastSeenUtc,
+        DateTimeOffset LastAckAttemptUtc,
+        int AckAttempts);
 }

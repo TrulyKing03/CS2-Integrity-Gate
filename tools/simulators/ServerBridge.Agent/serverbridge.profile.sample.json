@@ -8,5 +8,7 @@
   "flushSec": 3,
   "healthPollSec": 5,
   "actionPollSec": 3,
+  "actionApplyDedupeSec": 120,
+  "actionAckRetrySec": 5,
   "simulateCheat": true
 }

@@ -11,4 +11,6 @@ public sealed class PluginRuntimeOptions
     public int HealthPollSec { get; set; } = 5;
     public int ActionPollSec { get; set; } = 3;
     public int PendingActionFetchLimit { get; set; } = 200;
+    public int ActionApplyDedupeSec { get; set; } = 120;
+    public int ActionAckRetrySec { get; set; } = 5;
 }

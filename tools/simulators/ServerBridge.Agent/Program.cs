@@ -14,7 +14,9 @@ var runtimeOptions = new PluginRuntimeOptions
     MaxBatchSize = options.MaxBatchSize,
     TelemetryFlushSec = options.FlushSec,
     HealthPollSec = options.HealthPollSec,
-    ActionPollSec = options.ActionPollSec
+    ActionPollSec = options.ActionPollSec,
+    ActionApplyDedupeSec = options.ActionApplyDedupeSec,
+    ActionAckRetrySec = options.ActionAckRetrySec
 };
 
 using var runtime = new PluginRuntime(runtimeOptions, hostBridge);
@@ -175,6 +177,8 @@ internal sealed class AgentOptions
     public int FlushSec { get; private set; } = 3;
     public int HealthPollSec { get; private set; } = 5;
     public int ActionPollSec { get; private set; } = 3;
+    public int ActionApplyDedupeSec { get; private set; } = 120;
+    public int ActionAckRetrySec { get; private set; } = 5;
     public long StartTick { get; private set; } = 1000;
     public bool SimulateCheat { get; private set; }
 
@@ -250,6 +254,12 @@ internal sealed class AgentOptions
                     break;
                 case "--action-poll-sec":
                     options.ActionPollSec = int.Parse(ReadValue(args, ++i, "--action-poll-sec"));
+                    break;
+                case "--action-dedupe-sec":
+                    options.ActionApplyDedupeSec = int.Parse(ReadValue(args, ++i, "--action-dedupe-sec"));
+                    break;
+                case "--action-ack-retry-sec":
+                    options.ActionAckRetrySec = int.Parse(ReadValue(args, ++i, "--action-ack-retry-sec"));
                     break;
             }
         }
@@ -328,6 +338,16 @@ internal sealed class AgentOptions
             ActionPollSec = profile.ActionPollSec.Value;
         }
 
+        if (profile.ActionApplyDedupeSec is > 0)
+        {
+            ActionApplyDedupeSec = profile.ActionApplyDedupeSec.Value;
+        }
+
+        if (profile.ActionAckRetrySec is > 0)
+        {
+            ActionAckRetrySec = profile.ActionAckRetrySec.Value;
+        }
+
         if (profile.StartTick is > 0)
         {
             StartTick = profile.StartTick.Value;
@@ -364,6 +384,8 @@ internal sealed class AgentProfile
     public int? FlushSec { get; set; }
     public int? HealthPollSec { get; set; }
     public int? ActionPollSec { get; set; }
+    public int? ActionApplyDedupeSec { get; set; }
+    public int? ActionAckRetrySec { get; set; }
     public long? StartTick { get; set; }
     public bool? SimulateCheat { get; set; }
 }

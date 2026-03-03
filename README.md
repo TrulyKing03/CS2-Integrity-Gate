@@ -253,6 +253,7 @@ Main capabilities:
   - telemetry buffering and flush,
   - match-health polling and transition-based enforcement,
   - pending-action polling and acknowledgment (apply success/failure recorded).
+- Local action-apply dedupe and ack retry backoff to reduce duplicate host enforcement when backend ack calls are transiently unavailable.
 - Match runtime coordinator for per-match background loops while players are connected.
 - Final telemetry flush when match workers stop.
 - Typed backend client with server API-key auth header.
