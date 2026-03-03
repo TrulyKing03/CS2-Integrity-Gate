@@ -645,6 +645,8 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1
 ```
 
+`smoke-plugin-gateway.ps1` verifies connect flow, telemetry ingestion, host-action consume, and gateway metrics endpoints.
+
 ## Runbook
 
 ## Daily local verification

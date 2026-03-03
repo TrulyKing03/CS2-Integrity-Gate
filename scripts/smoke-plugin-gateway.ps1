@@ -159,6 +159,16 @@ try {
         throw "Expected at least 1 host action from gateway, got $actionCount"
     }
 
+    $countResult = Invoke-RestMethod -Method Get -Uri "$GatewayUrl/v1/plugin/host-actions/count?matchSessionId=$($session.matchSessionId)&accountId=$($session.accountId)" -Headers $headers
+    if ($countResult.count -ne 0) {
+        throw "Expected 0 pending host actions after consume, got $($countResult.count)"
+    }
+
+    $metrics = Invoke-RestMethod -Method Get -Uri "$GatewayUrl/v1/plugin/metrics" -Headers $headers
+    if ($null -eq $metrics.pendingActionTotal) {
+        throw "Gateway metrics response missing pendingActionTotal"
+    }
+
     Invoke-RestMethod -Method Post -Uri "$GatewayUrl/v1/plugin/disconnected" -Headers $headers -ContentType "application/json" -Body $sessionBody | Out-Null
     Write-Host "[gateway-smoke] complete actions=$actionCount"
 }
