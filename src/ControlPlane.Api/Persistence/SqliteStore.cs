@@ -72,6 +72,7 @@ public interface ISqliteStore
     Task<AppealRecord> CreateAppealAsync(CreateAppealRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<AppealRecord>> ListAppealsAsync(string? status, CancellationToken cancellationToken);
     Task<AppealRecord?> ResolveAppealAsync(ResolveAppealRequest request, CancellationToken cancellationToken);
+    Task<SystemSummaryMetrics> GetSystemSummaryMetricsAsync(CancellationToken cancellationToken);
 }
 
 public sealed record JoinTokenDbRecord(string Jti, string PayloadJson, DateTimeOffset? UsedAtUtc);
@@ -90,6 +91,17 @@ public sealed record TelemetryEventRecord(
     string AccountId,
     string PayloadJson,
     DateTimeOffset CreatedAtUtc);
+
+public sealed record SystemSummaryMetrics(
+    int AccountCount,
+    int MatchSessionCount,
+    int ActiveBanCount,
+    int PendingEnforcementActionCount,
+    int OpenReviewCaseCount,
+    int SubmittedAppealCount,
+    int EvidencePackCount,
+    DateTimeOffset? LastHeartbeatUtc,
+    DateTimeOffset? LastTelemetryUtc);
 
 public sealed class SqliteStore : ISqliteStore
 {
@@ -1628,6 +1640,65 @@ public sealed class SqliteStore : ISqliteStore
 
         await tx.CommitAsync(cancellationToken);
         return appeal;
+    }
+
+    public async Task<SystemSummaryMetrics> GetSystemSummaryMetricsAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT
+                (SELECT COUNT(1) FROM accounts) AS account_count,
+                (SELECT COUNT(1) FROM match_sessions) AS match_session_count,
+                (
+                    SELECT COUNT(1)
+                    FROM bans
+                    WHERE status = 'active'
+                      AND start_at_utc <= $now_utc
+                      AND (end_at_utc IS NULL OR end_at_utc > $now_utc)
+                ) AS active_ban_count,
+                (
+                    SELECT COUNT(1)
+                    FROM enforcement_actions e
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM enforcement_action_acks a
+                        WHERE a.action_id = e.action_id
+                    )
+                ) AS pending_actions_count,
+                (
+                    SELECT COUNT(1)
+                    FROM review_cases
+                    WHERE status IN ('open', 'in_review')
+                ) AS open_review_case_count,
+                (
+                    SELECT COUNT(1)
+                    FROM appeals
+                    WHERE status = 'submitted'
+                ) AS submitted_appeal_count,
+                (SELECT COUNT(1) FROM evidence_packs) AS evidence_pack_count,
+                (SELECT MAX(received_at_utc) FROM heartbeats) AS last_heartbeat_utc,
+                (SELECT MAX(created_at_utc) FROM telemetry_events) AS last_telemetry_utc;
+            """;
+        cmd.Parameters.AddWithValue("$now_utc", now);
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return new SystemSummaryMetrics(0, 0, 0, 0, 0, 0, 0, null, null);
+        }
+
+        return new SystemSummaryMetrics(
+            AccountCount: reader.GetInt32(0),
+            MatchSessionCount: reader.GetInt32(1),
+            ActiveBanCount: reader.GetInt32(2),
+            PendingEnforcementActionCount: reader.GetInt32(3),
+            OpenReviewCaseCount: reader.GetInt32(4),
+            SubmittedAppealCount: reader.GetInt32(5),
+            EvidencePackCount: reader.GetInt32(6),
+            LastHeartbeatUtc: reader.IsDBNull(7) ? null : DateTimeOffset.Parse(reader.GetString(7)),
+            LastTelemetryUtc: reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)));
     }
 
     private static EvidencePackSummary ReadEvidenceSummary(SqliteDataReader reader)

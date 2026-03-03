@@ -58,6 +58,12 @@ try {
         throw "No evidence generated for demo flow."
     }
 
+    Write-Host "[demo] system metrics"
+    dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey system-metrics
+    if ($LASTEXITCODE -ne 0) {
+        throw "Reviewer.Console system-metrics failed with exit code $LASTEXITCODE"
+    }
+
     $evidenceId = $evidence[0].evidenceId
     Write-Host "[demo] create case for evidence $evidenceId"
     $caseJson = dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key $internalKey create-case --evidence $evidenceId --match $session.matchSessionId --account $session.accountId --reason rules_impossible_state --priority high --by reviewer_demo

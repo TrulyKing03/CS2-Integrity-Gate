@@ -238,6 +238,7 @@ Central shared DTO contract library used by all services:
 Main capabilities:
 
 - Internal moderation CLI with `X-Internal-Api-Key` auth.
+- System summary metrics view for quick operational checks.
 - Evidence listing and lookup.
 - Review-case creation and status updates.
 - Ban creation/listing/status updates and appeal lifecycle handling.
@@ -259,6 +260,7 @@ System:
 - `GET /`
 - `GET /healthz`
 - `GET /v1/policy/current`
+- `GET /v1/metrics/summary` (internal auth)
 
 Auth + Queue:
 
@@ -318,6 +320,7 @@ Server-auth protected endpoints:
 Internal-auth protected endpoints:
 
 - Require header `X-Internal-Api-Key`:
+  - `/v1/metrics/*`
   - `/v1/evidence/*`
   - `/v1/review/*`
   - `/v1/moderation/*`
@@ -529,6 +532,7 @@ dotnet run --project tools/simulators/ServerBridge.Agent -- --backend http://loc
 Reviewer workflow examples:
 
 ```powershell
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key system-metrics
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-bans --account $session.accountId --status active

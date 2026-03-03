@@ -96,6 +96,22 @@ app.MapGet("/v1/policy/current", (
     });
 });
 
+app.MapGet("/v1/metrics/summary", async (
+    HttpContext context,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var summary = await store.GetSystemSummaryMetricsAsync(cancellationToken);
+    return Results.Ok(summary);
+});
+
 app.MapPost("/v1/auth/login", async (
     LoginRequest request,
     ISqliteStore store,

@@ -13,6 +13,13 @@ http.DefaultRequestHeaders.Add("X-Internal-Api-Key", options.InternalApiKey);
 
 switch (options.Command)
 {
+    case "system-metrics":
+    {
+        var metrics = await http.GetFromJsonAsync<object>("v1/metrics/summary", json)
+            ?? throw new InvalidOperationException("metrics response was empty");
+        Print(metrics, json);
+        break;
+    }
     case "list-evidence":
     {
         var route = "v1/evidence";
@@ -195,6 +202,7 @@ static void PrintUsage()
       --backend <url> --internal-api-key <key> <command> [options]
 
     Commands:
+      system-metrics
       list-evidence [--match <id>] [--account <id>]
       create-case --evidence <id> --match <id> --account <id> [--reason <code>] [--priority <level>] [--by <actor>]
       list-cases [--status <status>]
