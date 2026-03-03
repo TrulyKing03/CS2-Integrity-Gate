@@ -280,6 +280,7 @@ Main capabilities:
 - Security-event listing and aggregate summaries for incident triage.
 - Security alert status checks (threshold/cooldown worker state).
 - Manual security alert evaluation trigger for operations.
+- Enforcement action ack audit listing for host execution traceability.
 - Account session revocation tooling for compromised-token response.
 - Evidence listing and lookup.
 - Review-case creation and status updates.
@@ -310,6 +311,7 @@ System:
 - `GET /v1/ops/security/alerts/status` (internal auth)
 - `POST /v1/ops/security/alerts/evaluate` (internal auth)
 - `POST /v1/ops/auth/sessions/revoke` (internal auth)
+- `GET /v1/ops/enforcement/acks?matchSessionId=...&accountId=...&actionId=...&limit=...` (internal auth)
 
 Auth + Queue:
 
@@ -590,6 +592,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario secu
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-alerts-manual -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario session-revoke -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario auto-review -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario action-ack -SettingsPath ops/stack.settings.sample.json
 ```
 
 Local stack manager:
@@ -664,6 +667,7 @@ dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --i
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key security-alert-status
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-security-alert-eval
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key run-security-alert-eval --force
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-action-acks --match $session.matchSessionId --account $session.accountId --limit 50
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-bans --account $session.accountId --status active
@@ -693,6 +697,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-queue-auth.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-session-revoke.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-auto-review-case.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-action-ack-audit.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-policy-hash.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-security-events.ps1
@@ -721,6 +726,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-security-alert-manual.ps1
 13. Run `scripts/smoke-security-alert-status.ps1` when changing security alert thresholds or worker behavior.
 14. Run `scripts/smoke-security-alert-manual.ps1` when changing manual alert evaluation flows.
 15. Run `scripts/smoke-auto-review-case.ps1` when changing evidence-to-review automation.
+16. Run `scripts/smoke-action-ack-audit.ps1` when changing enforcement apply/ack behavior.
 
 ## Reset local state
 
@@ -883,6 +889,7 @@ No telemetry actions generated:
 |   |-- smoke-queue-auth.ps1
 |   |-- smoke-session-revoke.ps1
 |   |-- smoke-auto-review-case.ps1
+|   |-- smoke-action-ack-audit.ps1
 |   |-- smoke-retention-status.ps1
 |   |-- smoke-policy-hash.ps1
 |   |-- smoke-security-events.ps1
@@ -920,6 +927,7 @@ Current scope:
 - Security alert worker with threshold/cooldown status endpoint.
 - Access-token logout and internal account-session revocation workflow.
 - Automatic review-case seeding from configured high-confidence evidence triggers.
+- Internal enforcement action ack audit endpoint for operational traceability.
 - Evidence, review, ban, and appeal workflow APIs.
 - Offline threshold report generation for detector tuning.
 - SQLite-backed persistence.

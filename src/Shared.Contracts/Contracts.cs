@@ -181,6 +181,15 @@ public sealed record EnforcementActionAckResponse(
     string Reason,
     DateTimeOffset ReceivedAtUtc);
 
+public sealed record EnforcementActionAckRecord(
+    string ActionId,
+    string MatchSessionId,
+    string AccountId,
+    string ExecutorId,
+    string Result,
+    string Notes,
+    DateTimeOffset AckedAtUtc);
+
 public sealed record EvidencePackSummary(
     string EvidenceId,
     string MatchSessionId,

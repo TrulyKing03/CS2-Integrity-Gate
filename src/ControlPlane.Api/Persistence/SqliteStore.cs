@@ -82,6 +82,12 @@ public interface ISqliteStore
     Task<IReadOnlyList<EnforcementAction>> GetEnforcementActionsAsync(string matchSessionId, int limit, CancellationToken cancellationToken);
     Task<IReadOnlyList<EnforcementAction>> GetPendingEnforcementActionsAsync(string matchSessionId, string? accountId, int limit, CancellationToken cancellationToken);
     Task<bool> AcknowledgeEnforcementActionAsync(EnforcementActionAckRequest request, CancellationToken cancellationToken);
+    Task<IReadOnlyList<EnforcementActionAckRecord>> ListEnforcementActionAcksAsync(
+        string? matchSessionId,
+        string? accountId,
+        string? actionId,
+        int limit,
+        CancellationToken cancellationToken);
     Task<IReadOnlyList<TelemetryEventRecord>> GetRecentTelemetryEventsAsync(string matchSessionId, string accountId, int limit, CancellationToken cancellationToken);
     Task<IReadOnlyList<HeartbeatDbRecord>> GetRecentHeartbeatsAsync(string matchSessionId, string accountId, int limit, CancellationToken cancellationToken);
     Task SaveEvidencePackSummaryAsync(EvidencePackSummary summary, CancellationToken cancellationToken);
@@ -1180,6 +1186,76 @@ public sealed class SqliteStore : ISqliteStore
 
         var affected = await cmd.ExecuteNonQueryAsync(cancellationToken);
         return affected > 0;
+    }
+
+    public async Task<IReadOnlyList<EnforcementActionAckRecord>> ListEnforcementActionAcksAsync(
+        string? matchSessionId,
+        string? accountId,
+        string? actionId,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var normalizedLimit = Math.Clamp(limit, 1, 1000);
+        var result = new List<EnforcementActionAckRecord>();
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var cmd = connection.CreateCommand();
+        var query = """
+            SELECT action_id, match_session_id, account_id, executor_id, result, notes, acked_at_utc
+            FROM enforcement_action_acks
+            WHERE 1 = 1
+            """;
+
+        if (!string.IsNullOrWhiteSpace(matchSessionId))
+        {
+            query += """
+
+              AND match_session_id = $match_session_id
+            """;
+            cmd.Parameters.AddWithValue("$match_session_id", matchSessionId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(accountId))
+        {
+            query += """
+
+              AND account_id = $account_id
+            """;
+            cmd.Parameters.AddWithValue("$account_id", accountId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(actionId))
+        {
+            query += """
+
+              AND action_id = $action_id
+            """;
+            cmd.Parameters.AddWithValue("$action_id", actionId);
+        }
+
+        query += """
+
+            ORDER BY acked_at_utc DESC
+            LIMIT $limit;
+            """;
+        cmd.CommandText = query;
+        cmd.Parameters.AddWithValue("$limit", normalizedLimit);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new EnforcementActionAckRecord(
+                ActionId: reader.GetString(0),
+                MatchSessionId: reader.GetString(1),
+                AccountId: reader.GetString(2),
+                ExecutorId: reader.GetString(3),
+                Result: reader.GetString(4),
+                Notes: reader.GetString(5),
+                AckedAtUtc: DateTimeOffset.Parse(reader.GetString(6))));
+        }
+
+        return result;
     }
 
     public async Task<IReadOnlyList<TelemetryEventRecord>> GetRecentTelemetryEventsAsync(

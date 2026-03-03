@@ -79,6 +79,18 @@ switch (options.Command)
         await EnsureAndPrintAsync(response, json);
         break;
     }
+    case "list-action-acks":
+    {
+        var route = "v1/ops/enforcement/acks";
+        route = Append(route, "matchSessionId", options.MatchSessionId);
+        route = Append(route, "accountId", options.AccountId);
+        route = Append(route, "actionId", options.ActionId);
+        route = Append(route, "limit", options.Limit?.ToString());
+        var rows = await http.GetFromJsonAsync<List<EnforcementActionAckRecord>>(route, json)
+            ?? new List<EnforcementActionAckRecord>();
+        Print(rows, json);
+        break;
+    }
     case "list-evidence":
     {
         var route = "v1/evidence";
@@ -271,6 +283,7 @@ static void PrintUsage()
       security-summary [--since-minutes <n>]
       security-alert-status
       run-security-alert-eval [--force]
+      list-action-acks [--match <id>] [--account <id>] [--action <id>] [--limit <n>]
       list-evidence [--match <id>] [--account <id>]
       create-case --evidence <id> --match <id> --account <id> [--reason <code>] [--priority <level>] [--by <actor>]
       list-cases [--status <status>] [--match <id>] [--account <id>]
@@ -310,6 +323,7 @@ internal sealed class CliOptions
     public string? EventType { get; private set; }
     public string? Severity { get; private set; }
     public bool Force { get; private set; }
+    public string? ActionId { get; private set; }
 
     public static CliOptions Parse(string[] args)
     {
@@ -378,6 +392,10 @@ internal sealed class CliOptions
                     case "--event":
                     case "--event-type":
                         options.EventType = Read(args, ++i, arg);
+                        break;
+                    case "--action":
+                    case "--action-id":
+                        options.ActionId = Read(args, ++i, arg);
                         break;
                     case "--severity":
                         options.Severity = Read(args, ++i, arg);

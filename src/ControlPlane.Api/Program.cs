@@ -294,6 +294,31 @@ app.MapPost("/v1/ops/security/alerts/evaluate", async (
     return Results.Ok(result);
 });
 
+app.MapGet("/v1/ops/enforcement/acks", async (
+    HttpContext context,
+    string? matchSessionId,
+    string? accountId,
+    string? actionId,
+    int? limit,
+    ISqliteStore store,
+    IOptions<ApiAuthOptions> apiAuthOptions,
+    CancellationToken cancellationToken) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    var rows = await store.ListEnforcementActionAcksAsync(
+        matchSessionId,
+        accountId,
+        actionId,
+        limit ?? 200,
+        cancellationToken);
+    return Results.Ok(rows);
+});
+
 app.MapPost("/v1/ops/auth/sessions/revoke", async (
     RevokeAccountSessionsRequest request,
     HttpContext context,
