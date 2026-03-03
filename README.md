@@ -540,6 +540,28 @@ Remove-Item -Recurse -Force src/ControlPlane.Api/evidence -ErrorAction SilentlyC
 
 Then rerun API + AC to regenerate state.
 
+## Backup and restore
+
+Create a backup (DB only):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/backup-controlplane.ps1
+```
+
+Create a backup with evidence archive:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/backup-controlplane.ps1 -IncludeEvidence
+```
+
+Restore from backup:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/restore-controlplane.ps1 -BackupPath ops/backups/controlplane-YYYYMMDD-HHMMSS -Force
+```
+
+Detailed runbook: `ops/runbooks/backup-recovery.md`
+
 ## Integration Notes
 
 For real CS2 server integration:
@@ -624,6 +646,8 @@ No telemetry actions generated:
 |   |-- security
 |   `-- runbooks
 |-- scripts
+|   |-- backup-controlplane.ps1
+|   |-- restore-controlplane.ps1
 |   |-- run-controlplane.ps1
 |   |-- run-ac-service.ps1
 |   |-- run-launcher.ps1
