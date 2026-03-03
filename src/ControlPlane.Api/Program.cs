@@ -91,6 +91,7 @@ app.MapGet("/v1/policy/current", (
         graceWindowSec = policy.GraceWindowSec,
         requiredTierA = policy.RequiredTierA,
         requiredTierB = policy.RequiredTierB,
+        detection = policy.Detection,
         apiRateLimit = rateLimits
     });
 });

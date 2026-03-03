@@ -342,6 +342,7 @@ Current implementation stance:
 - Conservative, sample-count aware scoring.
 - Emits score updates and action recommendations.
 - Immediate action currently modeled as kick for severe rule patterns.
+- Thresholds and sample gates are configurable via `AcPolicy.Detection`.
 
 Important:
 
@@ -406,6 +407,7 @@ Key sections:
 - `AcPolicy.PolicyVersion`
 - `AcPolicy.RequiredTierA`
 - `AcPolicy.RequiredTierB`
+- `AcPolicy.Detection`
 - `ApiAuth.ServerApiKey`
 - `ApiAuth.InternalApiKey`
 - `ApiRateLimit.PublicAuth`

@@ -12,6 +12,7 @@ public sealed class AcPolicyOptions
     public string PolicyVersion { get; set; } = "pol_local";
     public PlatformTierOptions RequiredTierA { get; set; } = new();
     public PlatformTierOptions RequiredTierB { get; set; } = new();
+    public DetectionThresholdOptions Detection { get; set; } = new();
 }
 
 public sealed class PlatformTierOptions
@@ -20,4 +21,21 @@ public sealed class PlatformTierOptions
     public bool Tpm20 { get; set; } = true;
     public bool Iommu { get; set; }
     public bool Vbs { get; set; }
+}
+
+public sealed class DetectionThresholdOptions
+{
+    public int MinAimSamples { get; set; } = 30;
+    public int MinTriggerSamples { get; set; } = 20;
+    public int MinInfoSamples { get; set; } = 25;
+    public int MinMovementSamples { get; set; } = 80;
+    public double MovementScoreScale { get; set; } = 220.0;
+    public double AimHitRatioBaseline { get; set; } = 0.45;
+    public double AimScoreScale { get; set; } = 180.0;
+    public double TriggerScoreScale { get; set; } = 170.0;
+    public double InfoScoreScale { get; set; } = 160.0;
+    public double RulesViolationScoreScale { get; set; } = 20.0;
+    public int RulesTickActionMinViolations { get; set; } = 3;
+    public int RulesShotActionMinViolations { get; set; } = 4;
+    public int ActionCooldownSec { get; set; } = 30;
 }

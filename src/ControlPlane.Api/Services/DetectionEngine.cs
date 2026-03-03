@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using ControlPlane.Api.Options;
+using Microsoft.Extensions.Options;
 using Shared.Contracts;
 
 namespace ControlPlane.Api.Services;
@@ -16,14 +18,15 @@ public sealed record DetectionResult(
 
 internal sealed class DetectionEngine : IDetectionEngine
 {
-    private const int MinAimSamples = 30;
-    private const int MinTriggerSamples = 20;
-    private const int MinInfoSamples = 25;
-    private const int MinMovementSamples = 80;
-
+    private readonly DetectionThresholdOptions _thresholds;
     private readonly ConcurrentDictionary<string, PlayerDetectionState> _playerStates = new();
     private readonly ConcurrentDictionary<string, LosObservation> _losState = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _actionCooldown = new();
+
+    public DetectionEngine(IOptions<AcPolicyOptions> policyOptions)
+    {
+        _thresholds = policyOptions.Value.Detection ?? new DetectionThresholdOptions();
+    }
 
     public DetectionResult ProcessTicks(TelemetryEnvelope<TickPlayerState> envelope)
     {
@@ -46,23 +49,23 @@ internal sealed class DetectionEngine : IDetectionEngine
             playerState.LastTickState = tick;
             playerState.LastUpdatedUtc = DateTimeOffset.UtcNow;
 
-            if (playerState.MovementSamples >= MinMovementSamples)
+            if (playerState.MovementSamples >= _thresholds.MinMovementSamples)
             {
                 var ratio = (double)playerState.MovementViolations / playerState.MovementSamples;
-                var score = ClampTo100(ratio * 220.0);
+                var score = ClampTo100(ratio * _thresholds.MovementScoreScale);
                 updates.Add(new SuspicionScoreUpdate(
                     tick.MatchSessionId,
                     tick.AccountId,
                     "movement",
                     score,
-                    Confidence(playerState.MovementSamples, MinMovementSamples),
+                    Confidence(playerState.MovementSamples, _thresholds.MinMovementSamples),
                     playerState.MovementSamples,
                     DateTimeOffset.UtcNow));
             }
 
-            if (playerState.RuleViolations >= 3)
+            if (playerState.RuleViolations >= _thresholds.RulesTickActionMinViolations)
             {
-                var score = ClampTo100(playerState.RuleViolations * 20);
+                var score = ClampTo100(playerState.RuleViolations * _thresholds.RulesViolationScoreScale);
                 updates.Add(new SuspicionScoreUpdate(
                     tick.MatchSessionId,
                     tick.AccountId,
@@ -145,51 +148,51 @@ internal sealed class DetectionEngine : IDetectionEngine
                 }
             }
 
-            if (playerState.Shots >= MinAimSamples)
+            if (playerState.Shots >= _thresholds.MinAimSamples)
             {
                 var hitRatio = (double)playerState.Hits / Math.Max(1, playerState.Shots);
-                var aimScore = ClampTo100(Math.Max(0, (hitRatio - 0.45) * 180.0));
+                var aimScore = ClampTo100(Math.Max(0, (hitRatio - _thresholds.AimHitRatioBaseline) * _thresholds.AimScoreScale));
                 updates.Add(new SuspicionScoreUpdate(
                     shot.MatchSessionId,
                     shot.ShooterAccountId,
                     "aim",
                     aimScore,
-                    Confidence(playerState.Shots, MinAimSamples),
+                    Confidence(playerState.Shots, _thresholds.MinAimSamples),
                     playerState.Shots,
                     DateTimeOffset.UtcNow));
             }
 
-            if (playerState.TriggerSamples >= MinTriggerSamples)
+            if (playerState.TriggerSamples >= _thresholds.MinTriggerSamples)
             {
                 var ratio = (double)playerState.TriggerNearZero / Math.Max(1, playerState.TriggerSamples);
-                var triggerScore = ClampTo100(ratio * 170.0);
+                var triggerScore = ClampTo100(ratio * _thresholds.TriggerScoreScale);
                 updates.Add(new SuspicionScoreUpdate(
                     shot.MatchSessionId,
                     shot.ShooterAccountId,
                     "trigger",
                     triggerScore,
-                    Confidence(playerState.TriggerSamples, MinTriggerSamples),
+                    Confidence(playerState.TriggerSamples, _thresholds.MinTriggerSamples),
                     playerState.TriggerSamples,
                     DateTimeOffset.UtcNow));
             }
 
-            if (playerState.InfoSamples >= MinInfoSamples)
+            if (playerState.InfoSamples >= _thresholds.MinInfoSamples)
             {
                 var ratio = (double)playerState.InfoViolations / Math.Max(1, playerState.InfoSamples);
-                var infoScore = ClampTo100(ratio * 160.0);
+                var infoScore = ClampTo100(ratio * _thresholds.InfoScoreScale);
                 updates.Add(new SuspicionScoreUpdate(
                     shot.MatchSessionId,
                     shot.ShooterAccountId,
                     "info",
                     infoScore,
-                    Confidence(playerState.InfoSamples, MinInfoSamples),
+                    Confidence(playerState.InfoSamples, _thresholds.MinInfoSamples),
                     playerState.InfoSamples,
                     DateTimeOffset.UtcNow));
             }
 
-            if (playerState.RuleViolations >= 4)
+            if (playerState.RuleViolations >= _thresholds.RulesShotActionMinViolations)
             {
-                var ruleScore = ClampTo100(playerState.RuleViolations * 20.0);
+                var ruleScore = ClampTo100(playerState.RuleViolations * _thresholds.RulesViolationScoreScale);
                 updates.Add(new SuspicionScoreUpdate(
                     shot.MatchSessionId,
                     shot.ShooterAccountId,
@@ -255,7 +258,8 @@ internal sealed class DetectionEngine : IDetectionEngine
     {
         var key = $"{matchSessionId}|{accountId}|{reasonCode}";
         var now = DateTimeOffset.UtcNow;
-        if (_actionCooldown.TryGetValue(key, out var previous) && now - previous < TimeSpan.FromSeconds(30))
+        if (_actionCooldown.TryGetValue(key, out var previous) &&
+            now - previous < TimeSpan.FromSeconds(_thresholds.ActionCooldownSec))
         {
             return null;
         }
