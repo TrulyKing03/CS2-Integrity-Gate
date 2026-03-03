@@ -39,6 +39,7 @@ This repo contains multiple active .NET projects plus staged domain folders and 
 - `src/AcClient.Service`: local anti-cheat service process.
 - `src/Launcher.App`: launcher orchestration CLI/app baseline.
 - `tools/simulators/ServerBridge.Agent`: server integration simulator/bridge.
+- `tools/adapters/PluginBridge.Gateway`: local HTTP gateway for real plugin host integration.
 - `src/Shared.Contracts`: strongly typed shared contracts.
 - `src/Cs2.Plugin.CounterStrikeSharp`: plugin adapter runtime scaffold (join gate, telemetry, health/action polling, ack flow).
 - `src/Cs2.Plugin.Metamod`: reserved for alternate plugin integration wrapper.
@@ -81,11 +82,11 @@ High-level architecture:
 - Detection score and enforcement action output.
 - SQLite persistence for all key entities.
 
-4. Server Bridge (server side)
+4. Server Bridge / Plugin Gateway (server side)
 - Validates join token with backend.
 - Streams tick/shot/LoS telemetry.
 - Polls health/actions.
-- Applies action recommendations in integration layer.
+- Applies or forwards action recommendations in integration layer.
 
 ## Core Flows
 
@@ -219,6 +220,22 @@ Main capabilities:
 - Supports profile-based runtime settings (`tools/simulators/ServerBridge.Agent/serverbridge.profile.sample.json`).
 
 Use this as the runtime integration reference before binding to a real CS2 plugin host.
+
+## `tools/adapters/PluginBridge.Gateway`
+
+Main capabilities:
+
+- Exposes local HTTP endpoints your real plugin wrapper can call.
+- Uses shared runtime for join validation, telemetry buffering, health polling, and action polling.
+- Queues host actions for plugin-side consumption (`/v1/plugin/host-actions/consume`).
+- Keeps CS2 host integration code thinner by centralizing backend protocol logic.
+
+Run:
+
+```powershell
+dotnet run --project tools/adapters/PluginBridge.Gateway
+powershell -ExecutionPolicy Bypass -File scripts/run-plugin-gateway.ps1
+```
 ## `Cs2.Plugin.CounterStrikeSharp`
 
 Main capabilities:
@@ -440,6 +457,7 @@ Production notes:
 Key environment variables used by tooling:
 
 - `CS2IG_SERVER_API_KEY` (launcher self-validate and simulator default)
+- `CS2IG_BRIDGE_API_KEY` (plugin gateway clients)
 - `CS2IG_INTERNAL_API_KEY` (Reviewer.Console default)
 - `ApiAuth__ServerApiKey` and `ApiAuth__InternalApiKey` (control-plane overrides)
 
@@ -508,6 +526,7 @@ Scenario runner (single entrypoint for scripted flows):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario smoke -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario gateway -SettingsPath ops/stack.settings.sample.json
 ```
 
 Local stack manager:
@@ -516,6 +535,7 @@ Local stack manager:
 powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action start
 powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action status
 powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action stop
+powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action start -IncludeGateway
 ```
 
 Reviewer end-to-end demo:
@@ -561,6 +581,12 @@ dotnet run --project tools/simulators/ServerBridge.Agent -- --backend http://loc
 dotnet run --project tools/simulators/ServerBridge.Agent -- --profile tools/simulators/ServerBridge.Agent/serverbridge.profile.sample.json --match $session.matchSessionId --server $session.serverId --account $session.accountId --steam $session.steamId --token $token.joinToken
 ```
 
+Terminal 5 (optional real plugin gateway):
+
+```powershell
+dotnet run --project tools/adapters/PluginBridge.Gateway
+```
+
 Reviewer workflow examples:
 
 ```powershell
@@ -585,6 +611,13 @@ powershell -ExecutionPolicy Bypass -File scripts/run-launcher.ps1 -Command docto
 powershell -ExecutionPolicy Bypass -File scripts/run-launcher.ps1 -Command play -Profile src/Launcher.App/launcher.profile.sample.json
 ```
 
+Plugin gateway helper script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run-plugin-gateway.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1
+```
+
 ## Runbook
 
 ## Daily local verification
@@ -595,6 +628,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-launcher.ps1 -Command play 
 4. Confirm `src/ControlPlane.Api/data/controlplane.db` updates.
 5. Confirm action feed returns expected actions for synthetic cheat mode.
 6. Run `scripts/qa-run.ps1 -Fast` before merge.
+7. Run `scripts/smoke-plugin-gateway.ps1` before plugin host integration changes.
 
 ## Reset local state
 
@@ -632,17 +666,21 @@ Detailed runbook: `ops/runbooks/backup-recovery.md`
 
 For real CS2 server integration:
 
-1. Bind your real CS2 hooks to `src/Cs2.Plugin.CounterStrikeSharp` runtime methods (or mirror this flow in `src/Cs2.Plugin.Metamod`).
+1. Bind your real CS2 hooks to `src/Cs2.Plugin.CounterStrikeSharp` runtime methods (or mirror this flow in `src/Cs2.Plugin.Metamod`), or call `tools/adapters/PluginBridge.Gateway` endpoints from your plugin wrapper.
 2. On connection attempt:
 - extract player token.
-- send `X-Server-Api-Key`.
-- call `/v1/attestation/validate-join`.
+- if direct backend mode: send `X-Server-Api-Key` and call `/v1/attestation/validate-join`.
+- if gateway mode: send `X-Bridge-Api-Key` and call `/v1/plugin/connect-attempt`.
 - reject on any `allow=false`.
-3. During match:
+3. During match (direct backend mode):
 - push tick/shot/LoS telemetry in batches.
 - send `X-Server-Api-Key` on telemetry and health/action requests.
 - poll `/v1/attestation/match-health`.
 - consume `/v1/enforcement/actions/{matchSessionId}/pending` and ack via `/v1/enforcement/actions/ack`.
+4. During match (gateway mode):
+- post events to `/v1/plugin/ticks|shots|visibility`.
+- notify `/v1/plugin/connected|disconnected`.
+- consume host actions from `/v1/plugin/host-actions/consume`.
 
 For real launcher integration:
 
@@ -724,13 +762,17 @@ No telemetry actions generated:
 |   |-- run-controlplane.ps1
 |   |-- run-ac-service.ps1
 |   |-- run-launcher.ps1
+|   |-- run-plugin-gateway.ps1
 |   |-- run-scenario.ps1
 |   |-- stack-dev.ps1
 |   |-- run-threshold-tuner.ps1
 |   |-- smoke-test.ps1
+|   |-- smoke-plugin-gateway.ps1
 |   |-- smoke-ban-lifecycle.ps1
 |   `-- reviewer-demo.ps1
 |-- tools
+|   |-- adapters
+|   |   `-- PluginBridge.Gateway
 |   `-- simulators
 |       `-- ServerBridge.Agent
 `-- src
@@ -752,6 +794,7 @@ Current scope:
 - End-to-end handshake and gate.
 - Heartbeat health model.
 - Telemetry ingest and baseline detector outputs.
+- Local plugin HTTP gateway for runtime integration.
 - Ban-aware queue/join/heartbeat gating.
 - Evidence, review, ban, and appeal workflow APIs.
 - Offline threshold report generation for detector tuning.

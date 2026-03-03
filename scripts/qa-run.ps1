@@ -2,7 +2,8 @@ param(
     [string]$Backend = "http://localhost:5042",
     [switch]$Fast,
     [switch]$SkipReviewerDemo,
-    [switch]$SkipBanLifecycle
+    [switch]$SkipBanLifecycle,
+    [switch]$SkipPluginGatewaySmoke
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +32,10 @@ if (-not $Fast -and -not $SkipReviewerDemo) {
 
 if (-not $Fast -and -not $SkipBanLifecycle) {
     Invoke-Step "smoke-ban-lifecycle" { powershell -ExecutionPolicy Bypass -File scripts/smoke-ban-lifecycle.ps1 -Backend $Backend }
+}
+
+if (-not $Fast -and -not $SkipPluginGatewaySmoke) {
+    Invoke-Step "smoke-plugin-gateway" { powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1 -Backend $Backend }
 }
 
 Invoke-Step "threshold-tuner-sanity" { powershell -ExecutionPolicy Bypass -File scripts/run-threshold-tuner.ps1 -MinSamples 1 -MinConfidence 0.1 }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "gateway": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5055",
+      "environmentVariables": {
+        "Gateway__ListenUrl": "http://localhost:5055",
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

@@ -2,7 +2,8 @@ param(
     [ValidateSet("start", "stop", "status", "restart")]
     [string]$Action = "status",
     [string]$Backend = "http://localhost:5042",
-    [string]$RuntimeDir = "runtime"
+    [string]$RuntimeDir = "runtime",
+    [switch]$IncludeGateway
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,8 +15,10 @@ $pidsDir = Join-Path $runtimeAbsolute "pids"
 $logsDir = Join-Path $runtimeAbsolute "logs"
 $apiPidFile = Join-Path $pidsDir "controlplane.pid"
 $acPidFile = Join-Path $pidsDir "acclient.pid"
+$gatewayPidFile = Join-Path $pidsDir "plugingateway.pid"
 $apiLogFile = Join-Path $logsDir "controlplane.log"
 $acLogFile = Join-Path $logsDir "acclient.log"
+$gatewayLogFile = Join-Path $logsDir "plugingateway.log"
 
 function Ensure-Dirs {
     New-Item -ItemType Directory -Path $runtimeAbsolute -Force | Out-Null
@@ -122,9 +125,15 @@ switch ($Action) {
     "start" {
         Start-ServiceProcess -Name "controlplane" -PidFile $apiPidFile -LogFile $apiLogFile -ArgumentList @("run", "--project", "src/ControlPlane.Api", "--urls", $Backend)
         Start-ServiceProcess -Name "acclient" -PidFile $acPidFile -LogFile $acLogFile -ArgumentList @("run", "--project", "src/AcClient.Service")
+        if ($IncludeGateway) {
+            Start-ServiceProcess -Name "plugingateway" -PidFile $gatewayPidFile -LogFile $gatewayLogFile -ArgumentList @("run", "--project", "tools/adapters/PluginBridge.Gateway", "--", "Gateway:BackendBaseUrl=$Backend")
+        }
         break
     }
     "stop" {
+        if ($IncludeGateway) {
+            Stop-ServiceProcess -Name "plugingateway" -PidFile $gatewayPidFile
+        }
         Stop-ServiceProcess -Name "acclient" -PidFile $acPidFile
         Stop-ServiceProcess -Name "controlplane" -PidFile $apiPidFile
         break
@@ -132,12 +141,15 @@ switch ($Action) {
     "status" {
         Show-Status -Name "controlplane" -PidFile $apiPidFile -LogFile $apiLogFile
         Show-Status -Name "acclient" -PidFile $acPidFile -LogFile $acLogFile
+        if ($IncludeGateway) {
+            Show-Status -Name "plugingateway" -PidFile $gatewayPidFile -LogFile $gatewayLogFile
+        }
         break
     }
     "restart" {
-        & $PSCommandPath -Action stop -Backend $Backend -RuntimeDir $RuntimeDir
+        & $PSCommandPath -Action stop -Backend $Backend -RuntimeDir $RuntimeDir -IncludeGateway:$IncludeGateway
         Start-Sleep -Seconds 1
-        & $PSCommandPath -Action start -Backend $Backend -RuntimeDir $RuntimeDir
+        & $PSCommandPath -Action start -Backend $Backend -RuntimeDir $RuntimeDir -IncludeGateway:$IncludeGateway
         break
     }
 }

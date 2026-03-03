@@ -14,6 +14,7 @@ if (-not (Test-Path $settingsAbsolute)) {
 
 $settings = Get-Content $settingsAbsolute | ConvertFrom-Json
 $backend = if ($settings.backendBaseUrl) { $settings.backendBaseUrl } else { "http://localhost:5042" }
+$bridgeApiKey = if ($settings.bridgeApiKey) { $settings.bridgeApiKey } else { "dev-bridge-api-key" }
 $env:CS2IG_SERVER_API_KEY = if ($settings.serverApiKey) { $settings.serverApiKey } else { "dev-server-api-key" }
 $env:CS2IG_INTERNAL_API_KEY = if ($settings.internalApiKey) { $settings.internalApiKey } else { "dev-internal-api-key" }
 
@@ -34,12 +35,16 @@ switch ($Scenario.ToLowerInvariant()) {
         powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Backend $backend -Fast
         break
     }
+    "gateway" {
+        powershell -ExecutionPolicy Bypass -File scripts/smoke-plugin-gateway.ps1 -Backend $backend -BridgeApiKey $bridgeApiKey
+        break
+    }
     "qa-full" {
         powershell -ExecutionPolicy Bypass -File scripts/qa-run.ps1 -Backend $backend
         break
     }
     default {
-        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|qa-fast|qa-full)"
+        throw "Unknown scenario: $Scenario (expected smoke|reviewer|ban|gateway|qa-fast|qa-full)"
     }
 }
 
