@@ -18,13 +18,16 @@ builder.Services.Configure<ApiAuthOptions>(builder.Configuration.GetSection(ApiA
 builder.Services.Configure<ApiRateLimitOptions>(builder.Configuration.GetSection(ApiRateLimitOptions.SectionName));
 builder.Services.Configure<EvidenceOptions>(builder.Configuration.GetSection(EvidenceOptions.SectionName));
 builder.Services.Configure<DataRetentionOptions>(builder.Configuration.GetSection(DataRetentionOptions.SectionName));
+builder.Services.Configure<SecurityAlertOptions>(builder.Configuration.GetSection(SecurityAlertOptions.SectionName));
 builder.Services.AddSingleton<ISqliteStore, SqliteStore>();
 builder.Services.AddSingleton<IJoinTokenService, JoinTokenService>();
 builder.Services.AddSingleton<IDetectionEngine, DetectionEngine>();
 builder.Services.AddSingleton<IEvidenceService, EvidenceService>();
 builder.Services.AddSingleton<RetentionCleanupState>();
+builder.Services.AddSingleton<SecurityAlertState>();
 builder.Services.AddHostedService<StartupInitializer>();
 builder.Services.AddHostedService<RetentionCleanupWorker>();
+builder.Services.AddHostedService<SecurityAlertWorker>();
 
 var rateLimitOptions =
     builder.Configuration.GetSection(ApiRateLimitOptions.SectionName).Get<ApiRateLimitOptions>() ??
@@ -254,6 +257,20 @@ app.MapGet("/v1/ops/security/summary", async (
         : (DateTimeOffset?)null;
     var summary = await store.GetSecurityEventSummaryAsync(sinceUtc, cancellationToken);
     return Results.Ok(summary);
+});
+
+app.MapGet("/v1/ops/security/alerts/status", (
+    HttpContext context,
+    SecurityAlertState state,
+    IOptions<ApiAuthOptions> apiAuthOptions) =>
+{
+    var authFailure = EnsureInternalAuthorized(context, apiAuthOptions.Value);
+    if (authFailure is not null)
+    {
+        return authFailure;
+    }
+
+    return Results.Ok(state.Snapshot());
 });
 
 app.MapPost("/v1/ops/auth/sessions/revoke", async (

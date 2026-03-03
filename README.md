@@ -278,6 +278,7 @@ Main capabilities:
 - Internal moderation CLI with `X-Internal-Api-Key` auth.
 - System summary metrics view for quick operational checks.
 - Security-event listing and aggregate summaries for incident triage.
+- Security alert status checks (threshold/cooldown worker state).
 - Account session revocation tooling for compromised-token response.
 - Evidence listing and lookup.
 - Review-case creation and status updates.
@@ -305,6 +306,7 @@ System:
 - `GET /v1/ops/cleanup/status` (internal auth)
 - `GET /v1/ops/security/events` (internal auth)
 - `GET /v1/ops/security/summary` (internal auth)
+- `GET /v1/ops/security/alerts/status` (internal auth)
 - `POST /v1/ops/auth/sessions/revoke` (internal auth)
 
 Auth + Queue:
@@ -482,6 +484,12 @@ Key sections:
 - `DataRetention.HeartbeatRetentionHours`
 - `DataRetention.SecurityEventRetentionHours`
 - `DataRetention.TelemetryRetentionHours`
+- `SecurityAlerts.Enabled`
+- `SecurityAlerts.SweepIntervalSeconds`
+- `SecurityAlerts.WindowMinutes`
+- `SecurityAlerts.MediumThreshold`
+- `SecurityAlerts.HighThreshold`
+- `SecurityAlerts.CooldownMinutes`
 
 Production notes:
 
@@ -571,6 +579,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario queu
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario retention -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario policy-hash -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-events -SettingsPath ops/stack.settings.sample.json
+powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario security-alerts -SettingsPath ops/stack.settings.sample.json
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario session-revoke -SettingsPath ops/stack.settings.sample.json
 ```
 
@@ -643,6 +652,7 @@ dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --i
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key revoke-sessions --account $session.accountId --reason security_response --by ops
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key security-summary --since-minutes 60
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-security-events --since-minutes 60 --limit 50
+dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key security-alert-status
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-evidence --match $session.matchSessionId --account $session.accountId
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-cases --status open
 dotnet run --project src/Reviewer.Console -- --backend http://localhost:5042 --internal-api-key dev-internal-api-key list-bans --account $session.accountId --status active
@@ -674,6 +684,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-session-revoke.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-retention-status.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-policy-hash.ps1
 powershell -ExecutionPolicy Bypass -File scripts/smoke-security-events.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke-security-alert-status.ps1
 ```
 
 `smoke-plugin-gateway.ps1` verifies connect flow, telemetry ingestion, host-action consume, and gateway metrics endpoints.
@@ -694,6 +705,7 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-security-events.ps1
 10. Run `scripts/smoke-retention-status.ps1` when changing cleanup/ops behavior.
 11. Run `scripts/smoke-policy-hash.ps1` when changing AC policy enforcement.
 12. Run `scripts/smoke-security-events.ps1` when changing auth/rate-limit/ops auditing paths.
+13. Run `scripts/smoke-security-alert-status.ps1` when changing security alert thresholds or worker behavior.
 
 ## Reset local state
 
@@ -858,6 +870,7 @@ No telemetry actions generated:
 |   |-- smoke-retention-status.ps1
 |   |-- smoke-policy-hash.ps1
 |   |-- smoke-security-events.ps1
+|   |-- smoke-security-alert-status.ps1
 |   |-- smoke-ban-lifecycle.ps1
 |   `-- reviewer-demo.ps1
 |-- tools
@@ -887,6 +900,7 @@ Current scope:
 - Local plugin HTTP gateway for runtime integration.
 - Ban-aware queue/join/heartbeat gating.
 - Security-event audit logging and ops query endpoints.
+- Security alert worker with threshold/cooldown status endpoint.
 - Access-token logout and internal account-session revocation workflow.
 - Evidence, review, ban, and appeal workflow APIs.
 - Offline threshold report generation for detector tuning.

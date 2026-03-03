@@ -45,6 +45,12 @@ public sealed class JoinTokenService : IJoinTokenService
         payload = null;
         reason = null;
 
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            reason = "malformed_token";
+            return false;
+        }
+
         var parts = token.Split('.');
         if (parts.Length != 3)
         {
@@ -53,7 +59,17 @@ public sealed class JoinTokenService : IJoinTokenService
         }
 
         var signingInput = $"{parts[0]}.{parts[1]}";
-        var actualSig = Base64Url.Decode(parts[2]);
+        byte[] actualSig;
+        try
+        {
+            actualSig = Base64Url.Decode(parts[2]);
+        }
+        catch
+        {
+            reason = "malformed_token";
+            return false;
+        }
+
         var expectedSig = Sign(signingInput);
         if (!CryptographicOperations.FixedTimeEquals(actualSig, expectedSig))
         {

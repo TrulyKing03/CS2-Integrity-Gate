@@ -64,6 +64,13 @@ switch (options.Command)
         Print(items, json);
         break;
     }
+    case "security-alert-status":
+    {
+        var status = await http.GetFromJsonAsync<object>("v1/ops/security/alerts/status", json)
+            ?? throw new InvalidOperationException("security alert status response was empty");
+        Print(status, json);
+        break;
+    }
     case "list-evidence":
     {
         var route = "v1/evidence";
@@ -252,6 +259,7 @@ static void PrintUsage()
       revoke-sessions --account <id> [--reason <code>] [--by <actor>]
       list-security-events [--since-minutes <n>] [--severity low|medium|high] [--event <type>] [--limit <n>]
       security-summary [--since-minutes <n>]
+      security-alert-status
       list-evidence [--match <id>] [--account <id>]
       create-case --evidence <id> --match <id> --account <id> [--reason <code>] [--priority <level>] [--by <actor>]
       list-cases [--status <status>]
