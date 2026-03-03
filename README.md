@@ -509,6 +509,14 @@ Scenario runner (single entrypoint for scripted flows):
 powershell -ExecutionPolicy Bypass -File scripts/run-scenario.ps1 -Scenario smoke -SettingsPath ops/stack.settings.sample.json
 ```
 
+Local stack manager:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action start
+powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action status
+powershell -ExecutionPolicy Bypass -File scripts/stack-dev.ps1 -Action stop
+```
+
 Reviewer end-to-end demo:
 
 ```powershell
@@ -710,6 +718,7 @@ No telemetry actions generated:
 |   |-- run-ac-service.ps1
 |   |-- run-launcher.ps1
 |   |-- run-scenario.ps1
+|   |-- stack-dev.ps1
 |   |-- run-threshold-tuner.ps1
 |   |-- smoke-test.ps1
 |   |-- smoke-ban-lifecycle.ps1
